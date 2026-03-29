@@ -83,9 +83,9 @@ class STT(stt.STT):
         return response.json()
 
 
-    async def _recognize_impl(self,audio:AudioBuffer,*,language: NotGivenOr[str] = NOT_GIVEN,conn_options:APIConnectOptions) -> SpeechEvent:
+    async def _recognize_impl(self,audio:AudioBuffer,*,language: NotGivenOr[addisaiSttLanguages] = NOT_GIVEN,conn_options:APIConnectOptions) -> SpeechEvent:
         wav_bytes = audio.to_wav_bytes()
-        language = language or self._opts.language
+        language = language if is_given(language) else self._opts.language
         files = {
             "file": ("audio.wav", wav_bytes, "audio/wav")
         }
@@ -93,7 +93,7 @@ class STT(stt.STT):
             "language": str(language)
         }
 
-        result = await self.post(self.base_url,files,data)
+        result = await self.post(self._opts.base_url,files,data)
         transcript = result.get("data").get("transcription")
         return SpeechEvent(
                 type=SpeechEventType.FINAL_TRANSCRIPT,
