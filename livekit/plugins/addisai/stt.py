@@ -82,10 +82,10 @@ class STT(stt.STT):
         )
         return response.json()
 
-            
-    async def _recognize_impl(self,audio:AudioBuffer,*,conn_options:APIConnectOptions) -> SpeechEvent:
+
+    async def _recognize_impl(self,audio:AudioBuffer,*,language: NotGivenOr[str] = NOT_GIVEN,conn_options:APIConnectOptions) -> SpeechEvent:
         wav_bytes = audio.to_wav_bytes()
-        language = self._opts.language
+        language = language or self._opts.language
         files = {
             "file": ("audio.wav", wav_bytes, "audio/wav")
         }
