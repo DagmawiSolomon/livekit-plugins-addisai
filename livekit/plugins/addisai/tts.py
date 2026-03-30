@@ -1,6 +1,6 @@
 from livekit.agents import tts
 from livekit.agents.tts import ChunkedStream
-from types import addisaiTtsLanguages
+from .types import addisaiTtsLanguages
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
 
 @dataclass(frozen=True)
@@ -20,13 +20,13 @@ class TTS(tts.TTS):
         api_key: NotGivenOr[str] = NOT_GIVEN,
         stream: bool = True,
     ):
-       super().__init__(
+        super().__init__(
             capabilities=tts.TTSCapabilities(
                 streaming=True,
                 aligned_transcript=False,
             )
         )
-
+        
         addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
         if not addisai_api_key:
             raise ValueError(

@@ -1,5 +1,4 @@
 import os
-from typing import Literal
 from dataclasses import dataclass
 
 import httpx
@@ -14,7 +13,7 @@ from livekit.agents.stt import SpeechEvent, SpeechEventType, SpeechData
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import AudioBuffer, is_given
 
-from types import addisaiSttLanguages
+from .types import addisaiSttLanguages
 
 @dataclass(frozen=True)
 class STTOptions:
