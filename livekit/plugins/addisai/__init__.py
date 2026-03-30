@@ -1,3 +1,3 @@
 from .stt import STT
-
-__all__ = ["STT"]
+from .tts import TTS
+__all__ = ["STT","TTS"]
