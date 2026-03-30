@@ -14,8 +14,7 @@ from livekit.agents.stt import SpeechEvent, SpeechEventType, SpeechData
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import AudioBuffer, is_given
 
-
-addisaiSttLanguages = Literal["am", "om"]
+from types import addisaiSttLanguages
 
 @dataclass(frozen=True)
 class STTOptions:
