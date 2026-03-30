@@ -8,12 +8,12 @@ from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions
 from .types import addisaiTtsLanguages
 
-@dataclass(frozen=True)
+@dataclass()
 class TTSOptions:
     api_key: str
     language: addisaiTtsLanguages
+    stream: bool = True
     base_url: str = "https://api.addisassistant.com/api/v1/audio"
-    stream: bool
 
 
 class TTS(tts.TTS):
