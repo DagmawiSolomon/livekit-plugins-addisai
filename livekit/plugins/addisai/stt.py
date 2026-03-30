@@ -29,7 +29,7 @@ class STT(stt.STT):
         *, 
         language:addisaiSttLanguages,
         base_url:str = "https://api.addisassistant.com/api/v2/stt",
-        api_key:str | None = None
+        api_key:NotGivenOr[str] = NOT_GIVEN
         ):
 
         super().__init__(
