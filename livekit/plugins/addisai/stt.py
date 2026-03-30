@@ -71,7 +71,7 @@ class STT(stt.STT):
 
     async def post(self, url,files,data):
         headers = {
-            "Authorization": self._opts.api_key
+            "X-API-Key": self._opts.api_key
         }
         response = await self._client.post(
             url,
