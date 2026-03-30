@@ -24,11 +24,15 @@ class TTS(tts.TTS):
         base_url: str = "https://api.addisassistant.com/api/v1/audio",
         api_key: NotGivenOr[str] = NOT_GIVEN,
         stream: bool = True,
+        sample_rate: int,
+        num_channels: int
     ):
         super().__init__(
             capabilities=tts.TTSCapabilities(
                 streaming=True,
                 aligned_transcript=False,
+                sample_rate=sample_rate,
+                num_channels=num_channels
             )
         )
         addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
