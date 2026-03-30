@@ -1,7 +1,12 @@
+import os
+import httpx
+from dataclasses import dataclass
+from typing import Optional
 from livekit.agents import tts
 from livekit.agents.tts import ChunkedStream
+from livekit.agents.utils import is_given
+from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions
 from .types import addisaiTtsLanguages
-from livekit.agents.types import NOT_GIVEN, NotGivenOr
 
 @dataclass(frozen=True)
 class TTSOptions:
@@ -26,7 +31,6 @@ class TTS(tts.TTS):
                 aligned_transcript=False,
             )
         )
-        
         addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
         if not addisai_api_key:
             raise ValueError(
@@ -57,7 +61,7 @@ class TTS(tts.TTS):
             self._opts.stream = stream
         
     
-    def synthesize(self,text: str,*,conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) ‑> ChunkedStream:
+    def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> ChunkedStream:
         return AddisAIChunkedStream(
             tts=self,
             input_text=text,
@@ -79,7 +83,7 @@ class AddisAIChunkedStream(ChunkedStream):
         }
 
         try:
-            async with AsyncClient(timeout=self._conn_options.timeout) as client:
+            async with httpx.AsyncClient(timeout=self._conn_options.timeout) as client:
                 if self._tts._opts.stream:
                     async with client.stream(
                         "POST",
