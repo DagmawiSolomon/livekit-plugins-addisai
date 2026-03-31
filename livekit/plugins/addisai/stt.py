@@ -85,14 +85,14 @@ class STT(stt.STT):
         wav_bytes = audio.to_wav_bytes()
         language = language if is_given(language) else self._opts.language
         files = {
-            "file": ("audio.wav", wav_bytes, "audio/wav")
+            "audio": ("audio.wav", wav_bytes, "audio/wav")
         }
         data = {
-            "language": str(language)
+            "language_code": str(language)
         }
 
-        result = await self.post(self._opts.base_url,files,data)
-        transcript = result.get("data").get("transcription")
+        res = await self.post(self._opts.base_url,files,data)
+        transcript = res.get("data", {}).get("transcription")
         return SpeechEvent(
                 type=SpeechEventType.FINAL_TRANSCRIPT,
                 alternatives=[
