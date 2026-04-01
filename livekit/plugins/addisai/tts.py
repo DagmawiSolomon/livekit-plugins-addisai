@@ -17,11 +17,11 @@ from livekit import rtc
 
 @dataclass()
 class TTSOptions:
-    sample_rate: int
     api_key: str
     language: addisaiTtsLanguages
     stream: bool = False
     base_url: str = "https://api.addisassistant.com/api/v1/audio"
+    sample_rate: int = 16000
 
 
 class TTS(tts.TTS):
@@ -32,7 +32,7 @@ class TTS(tts.TTS):
         base_url: str = "https://api.addisassistant.com/api/v1/audio",
         api_key: NotGivenOr[str] = NOT_GIVEN,
         stream: bool = False,
-        sample_rate: int = 24000,
+        sample_rate: int = 16000,
         num_channels: int = 1
     ):
         super().__init__(
@@ -97,25 +97,23 @@ class ChunkedStream(ChunkedStream):
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._tts = tts
         self._opts= replace(tts._opts)
-        
+    
 
-    async def _run(self, output_emitter:AudioEmitter) -> None:
+    async def _run(self, output_emitter: AudioEmitter) -> None:
         payload = {
             "text": self._input_text,
             "language": self._tts._opts.language,
             "stream": True,
-         }
+        }
 
         headers = {
             "X-API-Key": self._tts._opts.api_key,
             "Content-Type": "application/json",
         }
 
-        print("Running...")
-
         output_emitter.initialize(
             request_id=utils.shortuuid(),
-            sample_rate=self._opts.sample_rate,
+            sample_rate=16000,
             num_channels=1,
             mime_type="audio/pcm",
         )
@@ -127,39 +125,25 @@ class ChunkedStream(ChunkedStream):
                 json=payload,
                 headers=headers,
             ) as response:
-                print("Inside")
+
                 response.raise_for_status()
+
                 audio_stream = AudioByteStream(
-                    sample_rate=self._tts.sample_rate,
-                    num_channels=self._tts.num_channels,
+                    sample_rate=self._opts.sample_rate,
+                    num_channels=1,
                 )
 
                 async for line in response.aiter_lines():
-                    if not line:
-                        continue
-
                     data = json.loads(line)
-                    b64 = data.get("audio_chunk")
-                    if not b64:
+                    base64_str = data.get("audio_chunk")
+                    if not base64_str:
                         continue
-
-                    wav_bytes = base64.b64decode(b64)
-
-                    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
-                        raw_pcm = wf.readframes(wf.getnframes())
-
-                        self._tts.sample_rate = wf.getframerate()
-                        self._tts.num_channels = wf.getnchannels()
-
-                    for frame in audio_stream.write(raw_pcm):
-                        output_emitter.push(frame)
-
-            for frame in audio_stream.flush():
-                output_emitter.push(frame)
-
-            output_emitter.flush()
-
 
                     
+                    pcm_data = base64.b64decode(base64_str)
+                    with open("speech.wav", "wb") as f:
+                        f.write(pcm_data)
 
+                    output_emitter.push(pcm_data)
 
+        output_emitter.flush()
