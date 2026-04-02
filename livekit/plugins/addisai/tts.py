@@ -7,7 +7,7 @@ import wave
 from dataclasses import dataclass, replace
 from typing import Optional, AsyncIterator
 from livekit.agents import tts, utils
-from livekit.agents.tts import ChunkedStream, AudioEmitter
+from livekit.agents.tts import ChunkedStream, AudioEmitter, SynthesizeStream
 from livekit.agents.utils.audio import AudioByteStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
@@ -22,7 +22,7 @@ from pydub import AudioSegment
 class TTSOptions:
     api_key: str
     language: addisaiTtsLanguages
-    stream: bool = False
+    stream: bool = True
     base_url: str = "https://api.addisassistant.com/api/v1/audio"
     sample_rate: int = 24000
 
@@ -155,3 +155,18 @@ class ChunkedStream(ChunkedStream):
                     output_emitter.push(pcm_data)
 
         output_emitter.flush()
+
+
+
+class SyntesizeStream(SynthesizeStream):
+
+    def __init__(self,*,tts:TTS, conn_options: APIConnectOptions=DEFAULT_API_CONNECT_OPTIONS):
+        super().__init__(tts=tts, conn_options=conn_options)
+        self._tts = tts
+        self._opts= replace(tts._opts)
+
+    async def _run(self, output_emitter: AudioEmitter) -> None:
+        pass
+
+    async def _stream_audio():
+        pass
