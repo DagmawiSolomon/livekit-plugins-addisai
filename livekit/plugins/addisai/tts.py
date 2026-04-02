@@ -24,7 +24,7 @@ class TTSOptions:
     language: addisaiTtsLanguages
     stream: bool = False
     base_url: str = "https://api.addisassistant.com/api/v1/audio"
-    sample_rate: int = 16000
+    sample_rate: int = 24000
 
 
 class TTS(tts.TTS):
