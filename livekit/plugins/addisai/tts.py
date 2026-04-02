@@ -104,7 +104,7 @@ class ChunkedStream(ChunkedStream):
     def decode_to_pcm(self, api_base64_audio: str) -> bytes:
         audio_bytes = base64.b64decode(api_base64_audio)
         audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
-        pcm_audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+        pcm_audio = audio.set_frame_rate(self._tts._opts.sample_rate).set_channels(1).set_sample_width(2)
         pcm_buffer = io.BytesIO()
         pcm_audio.export(pcm_buffer, format="raw")
         return pcm_buffer.getvalue()
@@ -124,7 +124,7 @@ class ChunkedStream(ChunkedStream):
 
         output_emitter.initialize(
             request_id=utils.shortuuid(),
-            sample_rate=16000,
+            sample_rate=self._tts._opts.sample_rate,
             num_channels=1,
             mime_type="audio/pcm",
         )
