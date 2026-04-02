@@ -14,6 +14,9 @@ from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAU
 from .types import addisaiTtsLanguages
 from livekit import rtc
 
+from pydub import AudioSegment
+
+
 
 @dataclass()
 class TTSOptions:
@@ -97,7 +100,15 @@ class ChunkedStream(ChunkedStream):
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._tts = tts
         self._opts= replace(tts._opts)
-    
+
+    def decode_to_pcm(self, api_base64_audio: str) -> bytes:
+        audio_bytes = base64.b64decode(api_base64_audio)
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+        pcm_audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+        pcm_buffer = io.BytesIO()
+        pcm_audio.export(pcm_buffer, format="raw")
+        return pcm_buffer.getvalue()
+
 
     async def _run(self, output_emitter: AudioEmitter) -> None:
         payload = {
@@ -140,10 +151,7 @@ class ChunkedStream(ChunkedStream):
                         continue
 
                     
-                    pcm_data = base64.b64decode(base64_str)
-                    with open("speech.wav", "wb") as f:
-                        f.write(pcm_data)
-
+                    pcm_data = self.decode_to_pcm(base64_str)
                     output_emitter.push(pcm_data)
 
         output_emitter.flush()
