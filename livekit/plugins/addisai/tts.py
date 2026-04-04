@@ -7,7 +7,8 @@ import wave
 from dataclasses import dataclass, replace
 from typing import Optional, AsyncIterator
 from livekit.agents import tts, utils
-from livekit.agents.tts import ChunkedStream, AudioEmitter, SynthesizeStream
+from livekit.agents.tts import AudioEmitter, SynthesizeStream
+from livekit.agents.tts import ChunkedStream as BaseChunkedStream
 from livekit.agents.utils.audio import AudioByteStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
@@ -40,7 +41,7 @@ class TTS(tts.TTS):
     ):
         super().__init__(
             capabilities=tts.TTSCapabilities(
-                streaming=stream,
+                streaming=False,
                 aligned_transcript=False,
             ),
             sample_rate=sample_rate,
@@ -78,22 +79,16 @@ class TTS(tts.TTS):
             self._opts.stream = stream
         
     
-    def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> ChunkedStream:
+    def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> BaseChunkedStream:
         return ChunkedStream(
             tts=self,
             input_text=text,
             conn_options=conn_options,
         )
+    
+   
 
-    def stream(self,*,conn_options: APIConnectOptions,) -> ChunkedStream:
-        return ChunkedStream(
-            tts=self,
-            input_text="",
-            conn_options=conn_options,
-        )
-
-
-class ChunkedStream(ChunkedStream):
+class ChunkedStream(BaseChunkedStream):
 
     def __init__(self,*,tts:TTS, input_text:str, conn_options:APIConnectOptions=DEFAULT_API_CONNECT_OPTIONS) -> None:
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
@@ -121,15 +116,15 @@ class ChunkedStream(ChunkedStream):
             "Content-Type": "application/json",
         }
 
+        
         output_emitter.initialize(
             request_id=utils.shortuuid(),
             sample_rate=self._tts._opts.sample_rate,
             num_channels=1,
             mime_type="audio/pcm",
         )
-
-        if self._tts._opts.stream:
-            async with httpx.AsyncClient(timeout=self._conn_options.timeout) as client:
+        async with httpx.AsyncClient(timeout=self._conn_options.timeout) as client:  
+            if self._tts._opts.stream:
                 async with client.stream(
                     "POST",
                     self._tts._opts.base_url,
@@ -144,18 +139,18 @@ class ChunkedStream(ChunkedStream):
                             continue
                         pcm_data = self.decode_to_pcm(base64_str)
                         output_emitter.push(pcm_data)
-        else:
-            response = await client.post(
-                self._tts._opts.base_url,
-                json=payload,
-                headers=headers
-            )
-            resonse.raise_for_status()
-            data = response.json()
-            base64_str = data.get("audio")
-            if base64_str:
-                pcm_data = self.decode_to_pcm(base64_str)
-                output_emitter.push(pcm_data)
+            else:
+                response = await client.post(
+                    self._tts._opts.base_url,
+                    json=payload,
+                    headers=headers
+                )   
+                response.raise_for_status()
+                data = response.json()
+                base64_str = data.get("audio")
+                if base64_str:
+                    pcm_data = self.decode_to_pcm(base64_str)
+                    output_emitter.push(pcm_data)
 
         output_emitter.flush()
 
