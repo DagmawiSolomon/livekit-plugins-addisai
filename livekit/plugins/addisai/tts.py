@@ -34,13 +34,13 @@ class TTS(tts.TTS):
         language: addisaiTtsLanguages,
         base_url: str = "https://api.addisassistant.com/api/v1/audio",
         api_key: NotGivenOr[str] = NOT_GIVEN,
-        stream: bool = False,
+        stream: bool = True ,
         sample_rate: int = 16000,
         num_channels: int = 1
     ):
         super().__init__(
             capabilities=tts.TTSCapabilities(
-                streaming=False,
+                streaming=stream,
                 aligned_transcript=False,
             ),
             sample_rate=sample_rate,
@@ -59,7 +59,6 @@ class TTS(tts.TTS):
             api_key=addisai_api_key,
             language=language,
             base_url=base_url,
-            # text=text,
             sample_rate=sample_rate,
             stream=stream
         )
@@ -156,17 +155,3 @@ class ChunkedStream(ChunkedStream):
 
         output_emitter.flush()
 
-
-
-class SyntesizeStream(SynthesizeStream):
-
-    def __init__(self,*,tts:TTS, conn_options: APIConnectOptions=DEFAULT_API_CONNECT_OPTIONS):
-        super().__init__(tts=tts, conn_options=conn_options)
-        self._tts = tts
-        self._opts= replace(tts._opts)
-
-    async def _run(self, output_emitter: AudioEmitter) -> None:
-        pass
-
-    async def _stream_audio():
-        pass
