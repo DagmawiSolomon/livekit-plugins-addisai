@@ -113,7 +113,7 @@ class ChunkedStream(ChunkedStream):
         payload = {
             "text": self._input_text,
             "language": self._tts._opts.language,
-            "stream": True,
+            "stream": self._tts._opts.stream,
         }
 
         headers = {
@@ -128,21 +128,15 @@ class ChunkedStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        async with httpx.AsyncClient(timeout=self._conn_options.timeout) as client:
-            async with client.stream(
-                "POST",
-                self._tts._opts.base_url,
+        if self._tts._opts.stream:
+            async with httpx.AsyncClient(timeout=self._conn_options.timeout) as client:
+                async with client.stream(
+                    "POST",
+                    self._tts._opts.base_url,
                 json=payload,
                 headers=headers,
             ) as response:
-
                 response.raise_for_status()
-
-                audio_stream = AudioByteStream(
-                    sample_rate=self._opts.sample_rate,
-                    num_channels=1,
-                )
-
                 async for line in response.aiter_lines():
                     data = json.loads(line)
                     base64_str = data.get("audio_chunk")
@@ -152,6 +146,20 @@ class ChunkedStream(ChunkedStream):
                     
                     pcm_data = self.decode_to_pcm(base64_str)
                     output_emitter.push(pcm_data)
+        else:
+            response = await client.post(
+                self._tts._opts.base_url,
+                json=payload,
+                headers=headers
+            )
+            resonse.raise_for_status()
+            data = response.json()
+            base64_str = data.get("audio")
+            if not base64_str:
+                continue
+            
+            pcm_data = self.decode_to_pcm(base64_str)
+            output_emitter.push(pcm_data)
 
         output_emitter.flush()
 
