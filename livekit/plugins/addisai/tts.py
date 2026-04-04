@@ -133,19 +133,17 @@ class ChunkedStream(ChunkedStream):
                 async with client.stream(
                     "POST",
                     self._tts._opts.base_url,
-                json=payload,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    data = json.loads(line)
-                    base64_str = data.get("audio_chunk")
-                    if not base64_str:
-                        continue
-
-                    
-                    pcm_data = self.decode_to_pcm(base64_str)
-                    output_emitter.push(pcm_data)
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        data = json.loads(line)
+                        base64_str = data.get("audio_chunk")
+                        if not base64_str:
+                            continue
+                        pcm_data = self.decode_to_pcm(base64_str)
+                        output_emitter.push(pcm_data)
         else:
             response = await client.post(
                 self._tts._opts.base_url,
@@ -155,11 +153,9 @@ class ChunkedStream(ChunkedStream):
             resonse.raise_for_status()
             data = response.json()
             base64_str = data.get("audio")
-            if not base64_str:
-                continue
-            
-            pcm_data = self.decode_to_pcm(base64_str)
-            output_emitter.push(pcm_data)
+            if base64_str:
+                pcm_data = self.decode_to_pcm(base64_str)
+                output_emitter.push(pcm_data)
 
         output_emitter.flush()
 
