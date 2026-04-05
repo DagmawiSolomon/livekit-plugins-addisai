@@ -1,6 +1,6 @@
 # AddisAI LiveKit Plugins
 
-> ### ⚠ Caution 
+> [!CAUTION]
 > **This project is currently under active development.**
 > It is not yet optimized for performance or hardened for production use. Expect potential bugs and lack of fault tolerance.
 
@@ -54,6 +54,7 @@ uv add ../livekit-plugins-addisai
 
 Create a `.env.local` file in the `agent-starter-python` directory and add your credentials:
 
+> [!info]
 > Use `.env.local` as the filename or ensure you update the `load_dotenv` call in `src/agent.py`, as the starter repo is configured to load `.env.local` by default.
 
 ```env
