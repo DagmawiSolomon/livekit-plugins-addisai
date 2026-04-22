@@ -64,7 +64,10 @@ class TTS(tts.TTS):
             stream=stream
         )
 
-        self._client = httpx.AsyncClient(timeout=30.0)
+        self._client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+        )
 
     @property
     def model(self) -> str:
@@ -74,10 +77,13 @@ class TTS(tts.TTS):
     def provider(self) -> str:
         return "AddisAI"
 
+    async def aclose(self) -> None:
+        await self._client.aclose()
+
     def update_options(self, *, stream: Optional[bool] = None) -> None:
         if is_given(stream):
             self._opts.stream = stream
-        
+
     
     def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> BaseChunkedStream:
         return ChunkedStream(
@@ -123,8 +129,8 @@ class ChunkedStream(BaseChunkedStream):
             num_channels=1,
             mime_type="audio/pcm",
         )
-        async with httpx.AsyncClient(timeout=self._conn_options.timeout) as client:  
-            if self._tts._opts.stream:
+        client = self._tts._client
+        if self._tts._opts.stream:
                 async with client.stream(
                     "POST",
                     self._tts._opts.base_url,
@@ -139,18 +145,18 @@ class ChunkedStream(BaseChunkedStream):
                             continue
                         pcm_data = self.decode_to_pcm(base64_str)
                         output_emitter.push(pcm_data)
-            else:
-                response = await client.post(
-                    self._tts._opts.base_url,
-                    json=payload,
-                    headers=headers
-                )   
-                response.raise_for_status()
-                data = response.json()
-                base64_str = data.get("audio")
-                if base64_str:
-                    pcm_data = self.decode_to_pcm(base64_str)
-                    output_emitter.push(pcm_data)
+        else:
+            response = await client.post(
+                self._tts._opts.base_url,
+                json=payload,
+                headers=headers
+            )   
+            response.raise_for_status()
+            data = response.json()
+            base64_str = data.get("audio")
+            if base64_str:
+                pcm_data = self.decode_to_pcm(base64_str)
+                output_emitter.push(pcm_data)
 
         output_emitter.flush()
 
