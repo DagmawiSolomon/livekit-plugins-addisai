@@ -138,6 +138,9 @@ class ChunkedStream(BaseChunkedStream):
                     ) as response:
                         response.raise_for_status()
                         async for line in response.aiter_lines():
+                            if output_emitter.is_closed():
+                                break
+
                             if not line.strip():
                                 continue
                             try:
@@ -160,7 +163,7 @@ class ChunkedStream(BaseChunkedStream):
                     response.raise_for_status()
                     data = response.json()
                     base64_str = data.get("audio")
-                    if base64_str:
+                    if base64_str and not output_emitter.is_closed():
                         pcm_data = self.decode_to_pcm(base64_str)
                         for pcm_chunk in bstream.write(pcm_data):
                             output_emitter.push(pcm_chunk)
