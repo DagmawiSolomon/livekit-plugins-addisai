@@ -10,6 +10,7 @@ from livekit.agents.tts import AudioEmitter
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
+from livekit.agents.utils.audio import AudioByteStream
 from .types import addisaiTtsLanguages
 import asyncio
 
@@ -121,6 +122,10 @@ class ChunkedStream(BaseChunkedStream):
             mime_type="audio/pcm",
         )
 
+        bstream = AudioByteStream(
+            sample_rate=self._tts._opts.sample_rate, num_channels=1
+        )
+
         for attempt in range(self._conn_options.max_retry + 1):
             try:
                 if self._tts._opts.stream:
@@ -143,7 +148,8 @@ class ChunkedStream(BaseChunkedStream):
                             if not base64_str:
                                 continue
                             pcm_data = self.decode_to_pcm(base64_str)
-                            output_emitter.push(pcm_data)
+                            for pcm_chunk in bstream.write(pcm_data):
+                                output_emitter.push(pcm_chunk)
                 else:
                     response = await self._tts._client.post(
                         self._tts._opts.base_url,
@@ -156,7 +162,8 @@ class ChunkedStream(BaseChunkedStream):
                     base64_str = data.get("audio")
                     if base64_str:
                         pcm_data = self.decode_to_pcm(base64_str)
-                        output_emitter.push(pcm_data)
+                        for pcm_chunk in bstream.write(pcm_data):
+                            output_emitter.push(pcm_chunk)
                 break
             except Exception as e:
                 if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
@@ -171,5 +178,8 @@ class ChunkedStream(BaseChunkedStream):
 
                 delay = self._conn_options.retry_interval * (2**attempt)
                 await asyncio.sleep(delay)
+
+        for pcm_chunk in bstream.flush():
+            output_emitter.push(pcm_chunk)
 
         output_emitter.flush()
