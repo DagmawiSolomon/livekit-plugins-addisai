@@ -5,13 +5,13 @@ import httpx
 import miniaudio
 from dataclasses import dataclass, replace
 from typing import Optional
-from livekit.agents import tts, utils
+from livekit.agents import tts, utils, APIConnectionError, APIStatusError, APITimeoutError
 from livekit.agents.tts import AudioEmitter
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 from .types import addisaiTtsLanguages
-
+import asyncio
 
 @dataclass()
 class TTSOptions:
@@ -121,39 +121,55 @@ class ChunkedStream(BaseChunkedStream):
             mime_type="audio/pcm",
         )
 
-        client = self._tts._client
+        for attempt in range(self._conn_options.max_retry + 1):
+            try:
+                if self._tts._opts.stream:
+                    async with self._tts._client.stream(
+                        "POST",
+                        self._tts._opts.base_url,
+                        json=payload,
+                        headers=headers,
+                        timeout=self._conn_options.timeout,
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            try:
+                                data = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            base64_str = data.get("audio_chunk")
+                            if not base64_str:
+                                continue
+                            pcm_data = self.decode_to_pcm(base64_str)
+                            output_emitter.push(pcm_data)
+                else:
+                    response = await self._tts._client.post(
+                        self._tts._opts.base_url,
+                        json=payload,
+                        headers=headers,
+                        timeout=self._conn_options.timeout,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    base64_str = data.get("audio")
+                    if base64_str:
+                        pcm_data = self.decode_to_pcm(base64_str)
+                        output_emitter.push(pcm_data)
+                break
+            except Exception as e:
+                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                    raise APIStatusError(str(e), status_code=e.response.status_code) from e
+                
+                if attempt >= self._conn_options.max_retry:
+                    if isinstance(e, httpx.TimeoutException):
+                        raise APITimeoutError() from e
+                    if isinstance(e, httpx.HTTPStatusError):
+                        raise APIStatusError(str(e), status_code=e.response.status_code) from e
+                    raise APIConnectionError() from e
 
-        if self._tts._opts.stream:
-            async with client.stream(
-                "POST",
-                self._tts._opts.base_url,
-                json=payload,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    base64_str = data.get("audio_chunk")
-                    if not base64_str:
-                        continue
-                    pcm_data = self.decode_to_pcm(base64_str)
-                    output_emitter.push(pcm_data)
-        else:
-            response = await client.post(
-                self._tts._opts.base_url,
-                json=payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            data = response.json()
-            base64_str = data.get("audio")
-            if base64_str:
-                pcm_data = self.decode_to_pcm(base64_str)
-                output_emitter.push(pcm_data)
+                delay = self._conn_options.retry_interval * (2**attempt)
+                await asyncio.sleep(delay)
 
         output_emitter.flush()
