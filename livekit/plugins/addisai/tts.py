@@ -13,6 +13,10 @@ from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAU
 from livekit.agents.utils.audio import AudioByteStream
 from .types import addisaiTtsLanguages
 import asyncio
+import logging
+import time
+
+logger = logging.getLogger(__name__)
 
 @dataclass()
 class TTSOptions:
@@ -126,6 +130,9 @@ class ChunkedStream(BaseChunkedStream):
             sample_rate=self._tts._opts.sample_rate, num_channels=1
         )
 
+        start_time = time.perf_counter()
+        first_chunk_pushed = False
+
         for attempt in range(self._conn_options.max_retry + 1):
             try:
                 if self._tts._opts.stream:
@@ -150,6 +157,12 @@ class ChunkedStream(BaseChunkedStream):
                             base64_str = data.get("audio_chunk")
                             if not base64_str:
                                 continue
+                            
+                            if not first_chunk_pushed:
+                                ttfb = (time.perf_counter() - start_time) * 1000
+                                logger.debug(f"AddisAI TTS streaming TTFB: {ttfb:.2f}ms")
+                                first_chunk_pushed = True
+
                             pcm_data = self.decode_to_pcm(base64_str)
                             for pcm_chunk in bstream.write(pcm_data):
                                 output_emitter.push(pcm_chunk)
@@ -164,15 +177,19 @@ class ChunkedStream(BaseChunkedStream):
                     data = response.json()
                     base64_str = data.get("audio")
                     if base64_str and not output_emitter.is_closed():
+                        ttfb = (time.perf_counter() - start_time) * 1000
+                        logger.debug(f"AddisAI TTS non-streaming TTFB: {ttfb:.2f}ms")
                         pcm_data = self.decode_to_pcm(base64_str)
                         for pcm_chunk in bstream.write(pcm_data):
                             output_emitter.push(pcm_chunk)
                 break
             except Exception as e:
                 if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                    logger.error(f"AddisAI TTS fatal error (4xx): {e}")
                     raise APIStatusError(str(e), status_code=e.response.status_code) from e
                 
                 if attempt >= self._conn_options.max_retry:
+                    logger.error(f"AddisAI TTS failed after {attempt} retries: {e}")
                     if isinstance(e, httpx.TimeoutException):
                         raise APITimeoutError() from e
                     if isinstance(e, httpx.HTTPStatusError):
@@ -180,6 +197,7 @@ class ChunkedStream(BaseChunkedStream):
                     raise APIConnectionError() from e
 
                 delay = self._conn_options.retry_interval * (2**attempt)
+                logger.warning(f"AddisAI TTS retry {attempt + 1}/{self._conn_options.max_retry} in {delay}s due to: {e}")
                 await asyncio.sleep(delay)
 
         for pcm_chunk in bstream.flush():
