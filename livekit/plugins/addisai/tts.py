@@ -93,13 +93,6 @@ class ChunkedStream(BaseChunkedStream):
         self._opts = replace(tts._opts)
 
     def decode_to_pcm(self, api_base64_audio: str) -> bytes:
-        """Decode a Base64-encoded audio chunk to raw 16-bit signed little-endian PCM.
-
-        The AddisAI API returns MP3 chunks in streaming mode and WAV in non-streaming
-        mode. miniaudio handles both formats transparently without any system
-        dependencies (no ffmpeg). It also resamples to the configured sample rate
-        and downmixes to mono in a single C-level pass — no extra allocations.
-        """
         audio_bytes = base64.b64decode(api_base64_audio)
         decoded = miniaudio.decode(
             audio_bytes,
