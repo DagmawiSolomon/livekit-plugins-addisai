@@ -145,27 +145,25 @@ class ChunkedStream(BaseChunkedStream):
                     ) as response:
                         response.raise_for_status()
                         async for line in response.aiter_lines():
-                            if output_emitter.is_closed():
-                                break
-
                             if not line.strip():
                                 continue
                             try:
                                 data = json.loads(line)
                             except json.JSONDecodeError:
                                 continue
-                            base64_str = data.get("audio_chunk")
-                            if not base64_str:
-                                continue
-                            
-                            if not first_chunk_pushed:
-                                ttfb = (time.perf_counter() - start_time) * 1000
-                                logger.debug(f"AddisAI TTS streaming TTFB: {ttfb:.2f}ms")
-                                first_chunk_pushed = True
 
-                            pcm_data = self.decode_to_pcm(base64_str)
-                            for pcm_chunk in bstream.write(pcm_data):
-                                output_emitter.push(pcm_chunk)
+                            if "audio_chunk" in data:
+                                base64_str = data["audio_chunk"]
+                                if not first_chunk_pushed:
+                                    ttfb = (time.perf_counter() - start_time) * 1000
+                                    logger.debug(f"AddisAI TTS streaming TTFB: {ttfb:.2f}ms")
+                                    first_chunk_pushed = True
+
+                                pcm_data = self.decode_to_pcm(base64_str)
+                                for pcm_chunk in bstream.write(pcm_data):
+                                    output_emitter.push(pcm_chunk)
+                            elif "error" in data:
+                                logger.error(f"AddisAI TTS streaming error: {data['error']}")
                 else:
                     response = await self._tts._client.post(
                         self._tts._opts.base_url,
@@ -176,12 +174,19 @@ class ChunkedStream(BaseChunkedStream):
                     response.raise_for_status()
                     data = response.json()
                     base64_str = data.get("audio")
-                    if base64_str and not output_emitter.is_closed():
-                        ttfb = (time.perf_counter() - start_time) * 1000
-                        logger.debug(f"AddisAI TTS non-streaming TTFB: {ttfb:.2f}ms")
+                    if base64_str:
+                        if not first_chunk_pushed:
+                            ttfb = (time.perf_counter() - start_time) * 1000
+                            logger.debug(f"AddisAI TTS non-streaming TTFB: {ttfb:.2f}ms")
+                            first_chunk_pushed = True
+
                         pcm_data = self.decode_to_pcm(base64_str)
                         for pcm_chunk in bstream.write(pcm_data):
                             output_emitter.push(pcm_chunk)
+                    elif "error" in data:
+                        logger.error(f"AddisAI TTS error: {data['error']}")
+                    else:
+                        logger.error(f"AddisAI TTS response missing 'audio' key. Keys: {list(data.keys())}")
                 break
             except Exception as e:
                 if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
