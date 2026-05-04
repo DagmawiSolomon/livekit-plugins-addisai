@@ -1,3 +1,5 @@
+import logging
+import asyncio
 import os
 import base64
 import json
@@ -11,6 +13,9 @@ from livekit.agents.tts import ChunkedStream as BaseChunkedStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 from .types import addisaiTtsLanguages
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass()
@@ -93,13 +98,6 @@ class ChunkedStream(BaseChunkedStream):
         self._opts = replace(tts._opts)
 
     def decode_to_pcm(self, api_base64_audio: str) -> bytes:
-        """Decode a Base64-encoded audio chunk to raw 16-bit signed little-endian PCM.
-
-        The AddisAI API returns MP3 chunks in streaming mode and WAV in non-streaming
-        mode. miniaudio handles both formats transparently without any system
-        dependencies (no ffmpeg). It also resamples to the configured sample rate
-        and downmixes to mono in a single C-level pass — no extra allocations.
-        """
         audio_bytes = base64.b64decode(api_base64_audio)
         decoded = miniaudio.decode(
             audio_bytes,
@@ -129,38 +127,53 @@ class ChunkedStream(BaseChunkedStream):
         )
 
         client = self._tts._client
-
-        if self._tts._opts.stream:
-            async with client.stream(
-                "POST",
-                self._tts._opts.base_url,
-                json=payload,
-                headers=headers,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    base64_str = data.get("audio_chunk")
-                    if not base64_str:
-                        continue
-                    pcm_data = self.decode_to_pcm(base64_str)
-                    output_emitter.push(pcm_data)
-        else:
-            response = await client.post(
-                self._tts._opts.base_url,
-                json=payload,
-                headers=headers
-            )
-            response.raise_for_status()
-            data = response.json()
-            base64_str = data.get("audio")
-            if base64_str:
-                pcm_data = self.decode_to_pcm(base64_str)
-                output_emitter.push(pcm_data)
+        for attempt in range(self._conn_options.max_retry + 1):
+            try:
+                if self._tts._opts.stream:
+                    async with client.stream(
+                        "POST",
+                        self._tts._opts.base_url,
+                        json=payload,
+                        headers=headers,
+                        timeout=self._conn_options.timeout,
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line.strip():
+                                continue
+                            try:
+                                data = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            base64_str = data.get("audio_chunk")
+                            if not base64_str:
+                                continue
+                            pcm_data = self.decode_to_pcm(base64_str)
+                            output_emitter.push(pcm_data)
+                else:
+                    response = await client.post(
+                        self._tts._opts.base_url,
+                        json=payload,
+                        headers=headers,
+                        timeout=self._conn_options.timeout,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    base64_str = data.get("audio")
+                    if base64_str:
+                        pcm_data = self.decode_to_pcm(base64_str)
+                        output_emitter.push(pcm_data)
+                
+                break
+            except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
+                    raise e
+                
+                if attempt == self._conn_options.max_retry:
+                    raise e
+                
+                delay = self._conn_options.retry_interval * (2 ** attempt)
+                logger.warning(f"AddisAI request failed (attempt {attempt+1}): {e}. Retrying in {delay}s...")
+                await asyncio.sleep(delay)
 
         output_emitter.flush()
