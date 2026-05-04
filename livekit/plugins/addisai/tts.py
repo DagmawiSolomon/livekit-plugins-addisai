@@ -2,27 +2,16 @@ import os
 import base64
 import json
 import httpx
-import io
-import wave
+import miniaudio
 from dataclasses import dataclass, replace
-from typing import Optional, AsyncIterator
+from typing import Optional
 from livekit.agents import tts, utils
-from livekit.agents.tts import AudioEmitter, SynthesizeStream
+from livekit.agents.tts import AudioEmitter
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
-from livekit.agents.utils.audio import AudioByteStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
-from livekit.agents.utils.audio import AudioByteStream
 from .types import addisaiTtsLanguages
-from livekit import rtc
 
-from pydub import AudioSegment
-
-
-from pydub import AudioSegment
-
-
-logger = logging.getLogger(__name__)
 
 @dataclass()
 class TTSOptions:
@@ -40,8 +29,8 @@ class TTS(tts.TTS):
         language: addisaiTtsLanguages,
         base_url: str = "https://api.addisassistant.com/api/v1/audio",
         api_key: NotGivenOr[str] = NOT_GIVEN,
-        stream: bool = True ,
-        sample_rate: int = 16000,
+        stream: bool = True,
+        sample_rate: int = 24000,
         num_channels: int = 1
     ):
         super().__init__(
@@ -53,7 +42,6 @@ class TTS(tts.TTS):
             num_channels=num_channels
         )
 
-        
         addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
         if not addisai_api_key:
             raise ValueError(
@@ -77,7 +65,7 @@ class TTS(tts.TTS):
     @property
     def model(self) -> str:
         return "አሌፍ-Audio"
-    
+
     @property
     def provider(self) -> str:
         return "AddisAI"
@@ -89,31 +77,37 @@ class TTS(tts.TTS):
         if is_given(stream):
             self._opts.stream = stream
 
-    
     def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> BaseChunkedStream:
         return ChunkedStream(
             tts=self,
             input_text=text,
             conn_options=conn_options,
         )
-    
-   
+
 
 class ChunkedStream(BaseChunkedStream):
 
-    def __init__(self,*,tts:TTS, input_text:str, conn_options:APIConnectOptions=DEFAULT_API_CONNECT_OPTIONS) -> None:
+    def __init__(self, *, tts: TTS, input_text: str, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> None:
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._tts = tts
-        self._opts= replace(tts._opts)
+        self._opts = replace(tts._opts)
 
     def decode_to_pcm(self, api_base64_audio: str) -> bytes:
-        audio_bytes = base64.b64decode(api_base64_audio)
-        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
-        pcm_audio = audio.set_frame_rate(self._tts._opts.sample_rate).set_channels(1).set_sample_width(2)
-        pcm_buffer = io.BytesIO()
-        pcm_audio.export(pcm_buffer, format="raw")
-        return pcm_buffer.getvalue()
+        """Decode a Base64-encoded audio chunk to raw 16-bit signed little-endian PCM.
 
+        The AddisAI API returns MP3 chunks in streaming mode and WAV in non-streaming
+        mode. miniaudio handles both formats transparently without any system
+        dependencies (no ffmpeg). It also resamples to the configured sample rate
+        and downmixes to mono in a single C-level pass — no extra allocations.
+        """
+        audio_bytes = base64.b64decode(api_base64_audio)
+        decoded = miniaudio.decode(
+            audio_bytes,
+            output_format=miniaudio.SampleFormat.SIGNED16,
+            nchannels=1,
+            sample_rate=self._tts._opts.sample_rate,
+        )
+        return bytes(decoded.samples)
 
     async def _run(self, output_emitter: AudioEmitter) -> None:
         payload = {
@@ -127,35 +121,41 @@ class ChunkedStream(BaseChunkedStream):
             "Content-Type": "application/json",
         }
 
-        
         output_emitter.initialize(
             request_id=utils.shortuuid(),
             sample_rate=self._tts._opts.sample_rate,
             num_channels=1,
             mime_type="audio/pcm",
         )
+
         client = self._tts._client
+
         if self._tts._opts.stream:
-                async with client.stream(
-                    "POST",
-                    self._tts._opts.base_url,
-                    json=payload,
-                    headers=headers,
-                ) as response:
-                    response.raise_for_status()
-                    async for line in response.aiter_lines():
+            async with client.stream(
+                "POST",
+                self._tts._opts.base_url,
+                json=payload,
+                headers=headers,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
                         data = json.loads(line)
-                        base64_str = data.get("audio_chunk")
-                        if not base64_str:
-                            continue
-                        pcm_data = self.decode_to_pcm(base64_str)
-                        output_emitter.push(pcm_data)
+                    except json.JSONDecodeError:
+                        continue
+                    base64_str = data.get("audio_chunk")
+                    if not base64_str:
+                        continue
+                    pcm_data = self.decode_to_pcm(base64_str)
+                    output_emitter.push(pcm_data)
         else:
             response = await client.post(
                 self._tts._opts.base_url,
                 json=payload,
                 headers=headers
-            )   
+            )
             response.raise_for_status()
             data = response.json()
             base64_str = data.get("audio")
@@ -164,4 +164,3 @@ class ChunkedStream(BaseChunkedStream):
                 output_emitter.push(pcm_data)
 
         output_emitter.flush()
-
