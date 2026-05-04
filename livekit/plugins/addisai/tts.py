@@ -2,19 +2,22 @@ import os
 import base64
 import json
 import httpx
-import miniaudio
+import io
+import wave
 from dataclasses import dataclass, replace
-from typing import Optional
-from livekit.agents import tts, utils, APIConnectionError, APIStatusError, APITimeoutError
-from livekit.agents.tts import AudioEmitter
+from typing import Optional, AsyncIterator
+from livekit.agents import tts, utils
+from livekit.agents.tts import AudioEmitter, SynthesizeStream
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
+from livekit.agents.utils.audio import AudioByteStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 from livekit.agents.utils.audio import AudioByteStream
 from .types import addisaiTtsLanguages
-import asyncio
-import logging
-import time
+from livekit import rtc
+
+from pydub import AudioSegment
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +37,8 @@ class TTS(tts.TTS):
         language: addisaiTtsLanguages,
         base_url: str = "https://api.addisassistant.com/api/v1/audio",
         api_key: NotGivenOr[str] = NOT_GIVEN,
-        stream: bool = True,
-        sample_rate: int = 24000,
+        stream: bool = True ,
+        sample_rate: int = 16000,
         num_channels: int = 1
     ):
         super().__init__(
@@ -47,6 +50,7 @@ class TTS(tts.TTS):
             num_channels=num_channels
         )
 
+        
         addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
         if not addisai_api_key:
             raise ValueError(
@@ -70,7 +74,7 @@ class TTS(tts.TTS):
     @property
     def model(self) -> str:
         return "አሌፍ-Audio"
-
+    
     @property
     def provider(self) -> str:
         return "AddisAI"
@@ -82,30 +86,31 @@ class TTS(tts.TTS):
         if is_given(stream):
             self._opts.stream = stream
 
+    
     def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> BaseChunkedStream:
         return ChunkedStream(
             tts=self,
             input_text=text,
             conn_options=conn_options,
         )
-
+    
+   
 
 class ChunkedStream(BaseChunkedStream):
 
-    def __init__(self, *, tts: TTS, input_text: str, conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS) -> None:
+    def __init__(self,*,tts:TTS, input_text:str, conn_options:APIConnectOptions=DEFAULT_API_CONNECT_OPTIONS) -> None:
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
         self._tts = tts
-        self._opts = replace(tts._opts)
+        self._opts= replace(tts._opts)
 
     def decode_to_pcm(self, api_base64_audio: str) -> bytes:
         audio_bytes = base64.b64decode(api_base64_audio)
-        decoded = miniaudio.decode(
-            audio_bytes,
-            output_format=miniaudio.SampleFormat.SIGNED16,
-            nchannels=1,
-            sample_rate=self._tts._opts.sample_rate,
-        )
-        return bytes(decoded.samples)
+        audio = AudioSegment.from_file(io.BytesIO(audio_bytes), format="mp3")
+        pcm_audio = audio.set_frame_rate(self._tts._opts.sample_rate).set_channels(1).set_sample_width(2)
+        pcm_buffer = io.BytesIO()
+        pcm_audio.export(pcm_buffer, format="raw")
+        return pcm_buffer.getvalue()
+
 
     async def _run(self, output_emitter: AudioEmitter) -> None:
         payload = {
@@ -119,93 +124,41 @@ class ChunkedStream(BaseChunkedStream):
             "Content-Type": "application/json",
         }
 
+        
         output_emitter.initialize(
             request_id=utils.shortuuid(),
             sample_rate=self._tts._opts.sample_rate,
             num_channels=1,
             mime_type="audio/pcm",
         )
-
-        bstream = AudioByteStream(
-            sample_rate=self._tts._opts.sample_rate, num_channels=1
-        )
-
-        start_time = time.perf_counter()
-        first_chunk_pushed = False
-
-        for attempt in range(self._conn_options.max_retry + 1):
-            try:
-                if self._tts._opts.stream:
-                    async with self._tts._client.stream(
-                        "POST",
-                        self._tts._opts.base_url,
-                        json=payload,
-                        headers=headers,
-                        timeout=self._conn_options.timeout,
-                    ) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if not line.strip():
-                                continue
-                            try:
-                                data = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-
-                            if "audio_chunk" in data:
-                                base64_str = data["audio_chunk"]
-                                if not first_chunk_pushed:
-                                    ttfb = (time.perf_counter() - start_time) * 1000
-                                    logger.debug(f"AddisAI TTS streaming TTFB: {ttfb:.2f}ms")
-                                    first_chunk_pushed = True
-
-                                pcm_data = self.decode_to_pcm(base64_str)
-                                for pcm_chunk in bstream.write(pcm_data):
-                                    output_emitter.push(pcm_chunk)
-                            elif "error" in data:
-                                logger.error(f"AddisAI TTS streaming error: {data['error']}")
-                else:
-                    response = await self._tts._client.post(
-                        self._tts._opts.base_url,
-                        json=payload,
-                        headers=headers,
-                        timeout=self._conn_options.timeout,
-                    )
+        client = self._tts._client
+        if self._tts._opts.stream:
+                async with client.stream(
+                    "POST",
+                    self._tts._opts.base_url,
+                    json=payload,
+                    headers=headers,
+                ) as response:
                     response.raise_for_status()
-                    data = response.json()
-                    base64_str = data.get("audio")
-                    if base64_str:
-                        if not first_chunk_pushed:
-                            ttfb = (time.perf_counter() - start_time) * 1000
-                            logger.debug(f"AddisAI TTS non-streaming TTFB: {ttfb:.2f}ms")
-                            first_chunk_pushed = True
-
+                    async for line in response.aiter_lines():
+                        data = json.loads(line)
+                        base64_str = data.get("audio_chunk")
+                        if not base64_str:
+                            continue
                         pcm_data = self.decode_to_pcm(base64_str)
-                        for pcm_chunk in bstream.write(pcm_data):
-                            output_emitter.push(pcm_chunk)
-                    elif "error" in data:
-                        logger.error(f"AddisAI TTS error: {data['error']}")
-                    else:
-                        logger.error(f"AddisAI TTS response missing 'audio' key. Keys: {list(data.keys())}")
-                break
-            except Exception as e:
-                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
-                    logger.error(f"AddisAI TTS fatal error (4xx): {e}")
-                    raise APIStatusError(str(e), status_code=e.response.status_code) from e
-                
-                if attempt >= self._conn_options.max_retry:
-                    logger.error(f"AddisAI TTS failed after {attempt} retries: {e}")
-                    if isinstance(e, httpx.TimeoutException):
-                        raise APITimeoutError() from e
-                    if isinstance(e, httpx.HTTPStatusError):
-                        raise APIStatusError(str(e), status_code=e.response.status_code) from e
-                    raise APIConnectionError() from e
-
-                delay = self._conn_options.retry_interval * (2**attempt)
-                logger.warning(f"AddisAI TTS retry {attempt + 1}/{self._conn_options.max_retry} in {delay}s due to: {e}")
-                await asyncio.sleep(delay)
-
-        for pcm_chunk in bstream.flush():
-            output_emitter.push(pcm_chunk)
+                        output_emitter.push(pcm_data)
+        else:
+            response = await client.post(
+                self._tts._opts.base_url,
+                json=payload,
+                headers=headers
+            )   
+            response.raise_for_status()
+            data = response.json()
+            base64_str = data.get("audio")
+            if base64_str:
+                pcm_data = self.decode_to_pcm(base64_str)
+                output_emitter.push(pcm_data)
 
         output_emitter.flush()
+
