@@ -19,6 +19,9 @@ from livekit import rtc
 from pydub import AudioSegment
 
 
+from pydub import AudioSegment
+
+
 logger = logging.getLogger(__name__)
 
 @dataclass()
