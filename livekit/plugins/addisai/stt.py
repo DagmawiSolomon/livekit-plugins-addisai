@@ -13,21 +13,22 @@ from livekit.agents.stt import SpeechEvent, SpeechEventType, SpeechData
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import AudioBuffer, is_given
 
-from .types import addisaiSttLanguages
+from .types import addisaiSttLanguages,API_BASE_URL
+
+DEFAULT_STT_URL = f"{API_BASE_URL}/stt"   
 
 @dataclass(frozen=True)
 class STTOptions:
     api_key: str
     language: addisaiSttLanguages
-    base_url: str = "https://api.addisassistant.com/api/v2/stt"
-   
+    base_url: str = DEFAULT_STT_URL
 
 class STT(stt.STT):
     def __init__(
         self,
         *, 
         language:addisaiSttLanguages,
-        base_url:str = "https://api.addisassistant.com/api/v2/stt",
+        base_url:str = DEFAULT_STT_URL
         api_key:NotGivenOr[str] = NOT_GIVEN
         ):
 
