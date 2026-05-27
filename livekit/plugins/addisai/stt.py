@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import httpx
 import asyncio
@@ -62,11 +62,11 @@ class STT(stt.STT):
     @property
     def provider(self) -> str:
         return "AddisAI"
-    
+
     def update_options(self, *, language:NotGivenOr[str] = NOT_GIVEN) -> None:
         if is_given(language):
-            self._language = language
-
+            return replace(self, language=langauge)
+        return self
 
     async def post(self, url,files,data):
         headers = {
