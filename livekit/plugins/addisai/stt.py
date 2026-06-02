@@ -63,8 +63,9 @@ class STT(stt.STT):
 
     def update_options(self, *, language:NotGivenOr[str] = NOT_GIVEN) -> None:
         if is_given(language):
-            return replace(self, language=langauge)
-        return self
+            self._opts = replace(self._opts, language=language)
+
+    
 
     async def post(self, url,files,data, attempt=0):
         headers = {
