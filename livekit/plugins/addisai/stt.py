@@ -67,7 +67,7 @@ class STT(stt.STT):
 
     
 
-    async def post(self, url,files,data, attempt=0):
+    async def post(self, url,files,data):
         headers = {
             "X-API-Key": self._opts.api_key
         }
@@ -88,9 +88,8 @@ class STT(stt.STT):
         data = {
             "language_code": str(language)
         }
-
-        res = await self.post(self._opts.base_url,files,data)
-        transcript = res.get("data", {}).get("transcription")
+        res = await self.post(self._opts.base_url,files,data, conn_options=conn_options)
+        transcript = res.get("data", {}).get("transcription", "")
         return SpeechEvent(
                 type=SpeechEventType.FINAL_TRANSCRIPT,
                 alternatives=[
@@ -101,8 +100,8 @@ class STT(stt.STT):
                 ],
             )
         
-
-
+    
+   
 
 
 
