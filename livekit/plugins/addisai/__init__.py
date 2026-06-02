@@ -1,5 +1,3 @@
-API_BASE_URL = "https://addisassistant.com"
-
 from .stt import STT
 from .tts import TTS
 

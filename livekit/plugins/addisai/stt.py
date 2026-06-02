@@ -1,21 +1,17 @@
+import asyncio
 import os
-from dataclasses import dataclass, replace
 import random
+from dataclasses import dataclass, replace
 
 import httpx
-import asyncio
-
+from typings import Literal
 
 from livekit.agents import stt
-from livekit.agents.utils import AudioBuffer
-from livekit.agents.types import APIConnectOptions
-from livekit.agents.stt import SpeechEvent, SpeechEventType, SpeechData
-
-from livekit.agents.types import NOT_GIVEN, NotGivenOr
+from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
+from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import AudioBuffer, is_given
-from typings import Literal
-from livekit.plugins.addisai import API_BASE_URL
 
+from .constants import API_BASE_URL
 
 DEFAULT_STT_URL = f"{API_BASE_URL}/api/v2/stt"   
 ADDIS_AI_STT_LANGUAGES = Literal["am", "om"]
@@ -58,9 +54,6 @@ class STT(stt.STT):
         )
 
         self._client = httpx.AsyncClient(timeout=30.0)
-        self.MAX_RETRIES = 5
-        self.attempts = 0
-        self.delay = 1
     @property
     def model(self) -> str:
         return "Unknown"
