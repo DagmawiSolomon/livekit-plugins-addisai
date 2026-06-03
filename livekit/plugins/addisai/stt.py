@@ -1,7 +1,9 @@
 import asyncio
 import os
 import random
+import json
 from dataclasses import dataclass, replace
+
 
 import httpx
 from typing import Literal
@@ -10,8 +12,11 @@ from livekit.agents import stt
 from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
 from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import AudioBuffer, is_given
-
+from livekit.agents._exceptions import APIError
 from .constants import API_BASE_URL
+
+
+
 
 DEFAULT_STT_URL = f"{API_BASE_URL}/api/v2/stt"   
 ADDIS_AI_STT_LANGUAGES = Literal["am", "om"]
@@ -66,44 +71,58 @@ class STT(stt.STT):
             self._opts = replace(self._opts, language=language)
 
     
+    async def post(self, url, files, data, conn_options):
+        headers = {"X-API-Key": self._opts.api_key}
 
-    async def post(self, url,files,data, conn_options:APIConnectOptions):
-        headers = {
-            "X-API-Key": self._opts.api_key
-        }
-        
-        response = await self._client.post(
-            url,
-            headers=headers,
-            files=files,
-            data=data,
-            timeout=conn_options.timeout
-        )
-        return response.json()
-        
-    async def _recognize_impl(self,audio:AudioBuffer,*,language: NotGivenOr[ADDIS_AI_STT_LANGUAGES] = NOT_GIVEN,conn_options:APIConnectOptions) -> SpeechEvent:
+        try:
+            response = await self._client.post(
+                url,
+                headers=headers,
+                files=files,
+                data=data,
+                timeout=conn_options.timeout,
+            )
+
+            return response
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            raise APIError(f"Network error contacting STT provider: {e}") from e
+
+
+    async def _recognize_impl(self,audio: AudioBuffer,*,language: NotGivenOr[ADDIS_AI_STT_LANGUAGES] = NOT_GIVEN,conn_options: APIConnectOptions,) -> SpeechEvent:
         wav_bytes = audio.to_wav_bytes()
         language = language if is_given(language) else self._opts.language
-        files = {
-            "audio": ("audio.wav", wav_bytes, "audio/wav")
-        }
-        data = {
-            "language_code": str(language)
-        }
-        res = await self.post(self._opts.base_url,files,data, conn_options=conn_options)
+
+        files = {"audio": ("audio.wav", wav_bytes, "audio/wav")}
+        data = {"language_code": str(language)}
+
+        response = await self.post(
+            self._opts.base_url,
+            files,
+            data,
+            conn_options=conn_options,
+        )
+
+        status = response.status_code
+
+        if status == 429 or 500 <= status < 600:
+            raise APIError(f"STT error {status}: {response.text}")
+        if status >= 400:
+            raise ValueError(f"STT error {status}: {response.text}")
+        try:
+            res = response.json()
+        except Exception as e:
+            raise ValueError("Invalid JSON from STT provider") from e
+
         transcript = res.get("data", {}).get("transcription", "")
+
         return SpeechEvent(
-                type=SpeechEventType.FINAL_TRANSCRIPT,
-                alternatives=[
-                    SpeechData(
-                        text=transcript,
-                        language=language,
-                    )
-                ],
-            )
-        
-    
-   
-
-
+            type=SpeechEventType.FINAL_TRANSCRIPT,
+            alternatives=[
+                SpeechData(
+                    text=transcript,
+                    language=language,
+                )
+            ],
+        )
 
