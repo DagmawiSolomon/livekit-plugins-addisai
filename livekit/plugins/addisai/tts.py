@@ -12,10 +12,11 @@ from livekit.agents.tts import AudioEmitter
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
-from typings import Literal
+from typing import Literal
 
+from .constants import API_BASE_URL
 
-ADDIS_AI_TTS_LANGUAGES = literal["am","om"]
+ADDIS_AI_TTS_LANGUAGES = Literal["am","om"]
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ DEFAULT_TTS_URL = f"{API_BASE_URL}/api/v1/audio"
 @dataclass()
 class TTSOptions:
     api_key: str
-    language: addisaiTtsLanguages
+    language: ADDIS_AI_TTS_LANGUAGES
     stream: bool = True
     base_url: str = DEFAULT_TTS_URL
     sample_rate: int = 24000
@@ -34,8 +35,8 @@ class TTS(tts.TTS):
     def __init__(
         self,
         *,
-        language: addisaiTtsLanguages,
-        base_url: str = DEFAULT_TTS_URL
+        language: ADDIS_AI_TTS_LANGUAGES,
+        base_url: str = DEFAULT_TTS_URL,
         api_key: NotGivenOr[str] = NOT_GIVEN,
         stream: bool = True,
         sample_rate: int = 24000,

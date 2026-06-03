@@ -1,6 +1,6 @@
 import httpx
 
-API_BASE_URL = "https://addisassistant.com"
+API_BASE_URL = "https://api.addisassistant.com"
 RETRIABLE_STATUS_CODES = {
     httpx.codes.REQUEST_TIMEOUT,
     httpx.codes.TOO_MANY_REQUESTS,

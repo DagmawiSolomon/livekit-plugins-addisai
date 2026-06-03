@@ -4,7 +4,7 @@ import random
 from dataclasses import dataclass, replace
 
 import httpx
-from typings import Literal
+from typing import Literal
 
 from livekit.agents import stt
 from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
@@ -53,7 +53,7 @@ class STT(stt.STT):
             base_url=base_url
         )
 
-        self._client = httpx.AsyncClient(timeout=30.0)
+        self._client = httpx.AsyncClient()
     @property
     def model(self) -> str:
         return "Unknown"
@@ -67,19 +67,21 @@ class STT(stt.STT):
 
     
 
-    async def post(self, url,files,data):
+    async def post(self, url,files,data, conn_options:APIConnectOptions):
         headers = {
             "X-API-Key": self._opts.api_key
         }
+        
         response = await self._client.post(
             url,
             headers=headers,
             files=files,
-            data=data
+            data=data,
+            timeout=conn_options.timeout
         )
         return response.json()
         
-    async def _recognize_impl(self,audio:AudioBuffer,*,language: NotGivenOr[addisaiSttLanguages] = NOT_GIVEN,conn_options:APIConnectOptions) -> SpeechEvent:
+    async def _recognize_impl(self,audio:AudioBuffer,*,language: NotGivenOr[ADDIS_AI_STT_LANGUAGES] = NOT_GIVEN,conn_options:APIConnectOptions) -> SpeechEvent:
         wav_bytes = audio.to_wav_bytes()
         language = language if is_given(language) else self._opts.language
         files = {
