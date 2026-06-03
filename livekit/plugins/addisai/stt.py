@@ -22,7 +22,7 @@ from .constants import API_BASE_URL
 DEFAULT_STT_URL = f"{API_BASE_URL}/api/v2/stt"   
 ADDIS_AI_STT_LANGUAGES = Literal["am", "om"]
 
-logger = logging.getLogger("__name__")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -117,92 +117,85 @@ class STT(stt.STT):
             )
             raise APIError("Network error contacting STT provider") from e
 
-async def _recognize_impl(
-    self,
-    audio: AudioBuffer,
-    *,
-    language: NotGivenOr[ADDIS_AI_STT_LANGUAGES] = NOT_GIVEN,
-    conn_options: APIConnectOptions,
-) -> SpeechEvent:
+    async def _recognize_impl(self,audio: AudioBuffer,*,language: NotGivenOr[ADDIS_AI_STT_LANGUAGES] = NOT_GIVEN,conn_options: APIConnectOptions) -> SpeechEvent:
+        language = language if is_given(language) else self._opts.language
+        wav_bytes = audio.to_wav_bytes()
 
-    language = language if is_given(language) else self._opts.language
-    wav_bytes = audio.to_wav_bytes()
-
-    logger.info(
-        "stt_recognition_started",
-        extra={
-            "provider": self.provider,
-            "model": self.model,
-            "language": str(language),
-            "audio_bytes": len(wav_bytes),
-        },
-    )
-
-    files = {"audio": ("audio.wav", wav_bytes, "audio/wav")}
-    data = {"language_code": str(language)}
-
-    response = await self.post(
-        self._opts.base_url,
-        files,
-        data,
-        conn_options=conn_options,
-    )
-
-    status = response.status_code
-
-    if status == 429 or 500 <= status < 600:
-        logger.warning(
-            "stt_http_error",
+        logger.info(
+            "stt_recognition_started",
             extra={
                 "provider": self.provider,
                 "model": self.model,
-                "status": status,
+                "language": str(language),
+                "audio_bytes": len(wav_bytes),
             },
         )
-        raise APIError(f"STT error {status}")
 
-    if status >= 400:
-        logger.error(
-            "stt_http_error",
-            extra={
-                "provider": self.provider,
-                "model": self.model,
-                "status": status,
-            },
+        files = {"audio": ("audio.wav", wav_bytes, "audio/wav")}
+        data = {"language_code": str(language)}
+
+        response = await self.post(
+            self._opts.base_url,
+            files,
+            data,
+            conn_options=conn_options,
         )
-        raise ValueError(f"STT error {status}")
 
-    try:
-        res = response.json()
-    except Exception as e:
-        logger.warning(
-            "stt_invalid_response",
-            extra={
-                "provider": self.provider,
-                "model": self.model,
-            },
-            exc_info=e,
-        )
-        raise ValueError("Invalid JSON from STT provider") from e
+        status = response.status_code
 
-    transcript = res.get("data", {}).get("transcription", "")
-
-    logger.info(
-        "stt_recognition_completed",
-        extra={
-            "provider": self.provider,
-            "model": self.model,
-            "language": str(language),
-            "transcript_length": len(transcript),
-        },
-    )
-
-    return SpeechEvent(
-        type=SpeechEventType.FINAL_TRANSCRIPT,
-        alternatives=[
-            SpeechData(
-                text=transcript,
-                language=language,
+        if status == 429 or 500 <= status < 600:
+            logger.warning(
+                "stt_http_error",
+                extra={
+                    "provider": self.provider,
+                    "model": self.model,
+                    "status": status,
+                },
             )
-        ],
-    )
+            raise APIError(f"STT error {status}")
+
+        if status >= 400:
+            logger.error(
+                "stt_http_error",
+                extra={
+                    "provider": self.provider,
+                    "model": self.model,
+                    "status": status,
+                },
+            )
+            raise ValueError(f"STT error {status}")
+
+        try:
+            res = response.json()
+        except Exception as e:
+            logger.warning(
+                "stt_invalid_response",
+                extra={
+                    "provider": self.provider,
+                    "model": self.model,
+                },
+                exc_info=e,
+            )
+            raise ValueError("Invalid JSON from STT provider") from e
+
+        transcript = res.get("data", {}).get("transcription", "")
+
+        logger.info(
+            "stt_recognition_completed",
+            extra={
+                "provider": self.provider,
+                "model": self.model,
+                "language": str(language),
+                "transcript_length": len(transcript),
+            },
+        )
+
+        return SpeechEvent(
+            type=SpeechEventType.FINAL_TRANSCRIPT,
+            alternatives=[
+                SpeechData(
+                    text=transcript,
+                    language=language,
+                )
+            ],
+        )
