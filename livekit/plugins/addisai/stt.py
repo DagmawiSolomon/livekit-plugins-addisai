@@ -17,8 +17,6 @@ from livekit.agents._exceptions import APIError
 from .constants import API_BASE_URL
 
 
-
-
 DEFAULT_STT_URL = f"{API_BASE_URL}/api/v2/stt"   
 ADDIS_AI_STT_LANGUAGES = Literal["am", "om"]
 
@@ -143,7 +141,18 @@ class STT(stt.STT):
 
         status = response.status_code
 
-        if status == 429 or 500 <= status < 600:
+        if status == 429:
+            logger.warning(
+                "stt_rate_limited"
+                extra={
+                    "provider": self.provider,
+                    "model": self.model,
+                    "status": status,
+                }
+            )
+             raise ValueError(f"STT rate limited {status}")
+
+        if 500 <= status < 600:
             logger.warning(
                 "stt_http_error",
                 extra={
