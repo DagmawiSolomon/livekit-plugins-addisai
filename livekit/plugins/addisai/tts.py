@@ -78,9 +78,10 @@ class TTS(tts.TTS):
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    def update_options(self, *, stream: Optional[bool] = None) -> None:
-        if is_given(stream):
-            self._opts.stream = stream
+    def update_options(self, *, language:NotGivenOr[str] = NOT_GIVEN) -> None:
+        if is_given(language):
+            self._opts = replace(self._opts, language=language)
+
 
     def synthesize(self, text: str, *, conn_options: APIConnectOptions = APIConnectOptions(max_retry=3, retry_interval=2.0, timeout=10.0)) -> BaseChunkedStream:
         return ChunkedStream(
