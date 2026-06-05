@@ -20,9 +20,8 @@ ADDIS_AI_TTS_LANGUAGES = Literal["am","om"]
 
 logger = logging.getLogger(__name__)
 
-
 DEFAULT_TTS_URL = f"{API_BASE_URL}/api/v1/audio"
-@dataclass()
+@dataclass(frozen=True)
 class TTSOptions:
     api_key: str
     language: ADDIS_AI_TTS_LANGUAGES
