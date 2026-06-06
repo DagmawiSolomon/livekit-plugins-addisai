@@ -150,7 +150,7 @@ class STT(stt.STT):
                     "status": status,
                 }
             )
-             raise ValueError(f"STT rate limited {status}")
+            raise ValueError(f"STT rate limited {status}")
 
         if 500 <= status < 600:
             logger.warning(
