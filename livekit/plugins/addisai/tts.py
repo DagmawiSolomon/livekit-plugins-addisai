@@ -108,17 +108,80 @@ class ChunkedStream(BaseChunkedStream):
         )
         return bytes(decoded.samples)
 
-    async def _run(self, output_emitter: AudioEmitter) -> None:
-        payload = {
-            "text": self._input_text,
-            "language": self._tts._opts.language,
-            "stream": self._tts._opts.stream,
-        }
+    
+    def _build_request(self):
+        return (
+            {
+                "text": self._input_text,
+                "language": self._tts._opts.language,
+                "stream": self._tts._opts.stream,
+            },
+            {
+                "X-API-Key": self._tts._opts.api_key,
+                "Content-Type": "application/json",
+            },
+        )
 
-        headers = {
-            "X-API-Key": self._tts._opts.api_key,
-            "Content-Type": "application/json",
-        }
+    def _raise_for_status(self, response):
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise APIError(
+                f"STT provider error: {response.status_code}"
+            ) from e
+
+    def _parse_stream_line(self, line: str):
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+
+        base64_str = data.get("audio_chunk")
+        if not base64_str:
+            return None
+
+        return self.decode_to_pcm(base64_str)
+
+
+    async def _run_streaming(self, output_emitter: AudioEmitter):
+        payload, headers = self._build_request() 
+        async with self._tts._client.stream(
+            "POST",
+            self._tts._opts.base_url,
+            json=payload,
+            headers=headers,
+            timeout=self._conn_options.timeout,
+        ) as response:
+
+            self._raise_for_status(response)
+            async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    pcm = self._parse_stream_line(line)
+                    if pcm:
+                        output_emitter.push(pcm)
+
+    async def _run_non_streaming(self, output_emitter):
+        payload, headers = self._build_request()
+
+        response = await self._tts._client.post(
+            self._tts._opts.base_url,
+            json=payload,
+            headers=headers,
+            timeout=self._conn_options.timeout,
+        )
+
+        self._raise_for_status(response)
+
+        data = response.json()
+        base64_str = data.get("audio")
+
+        if base64_str:
+            output_emitter.push(self.decode_to_pcm(base64_str))
+
+
+
+    async def _run(self, output_emitter: AudioEmitter) -> None:
 
         output_emitter.initialize(
             request_id=utils.shortuuid(),
@@ -127,63 +190,9 @@ class ChunkedStream(BaseChunkedStream):
             mime_type="audio/pcm",
         )
 
-        client = self._tts._client
-
-
-        try:
-            if self._tts._opts.stream:
-                async with client.stream(
-                    "POST",
-                    self._tts._opts.base_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=self._conn_options.timeout,
-                ) as response:
-                    response.raise_for_status()
-
-                    async for line in response.aiter_lines():
-                        if not line.strip():
-                            continue
-
-                        try:
-                            data = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-
-                        base64_str = data.get("audio_chunk")
-                        if not base64_str:
-                            continue
-
-                        pcm_data = self.decode_to_pcm(base64_str)
-                        output_emitter.push(pcm_data)
-
-            else:
-                response = await client.post(
-                    self._tts._opts.base_url,
-                    json=payload,
-                    headers=headers,
-                    timeout=self._conn_options.timeout,
-                )
-
-                response.raise_for_status()
-
-                data = response.json()
-                base64_str = data.get("audio")
-
-                if base64_str:
-                    pcm_data = self.decode_to_pcm(base64_str)
-                    output_emitter.push(pcm_data)
-
-            break
-
-        except exception as e:
-        
-
-            logger.warning(
-                f"AddisAI request failed (attempt {attempt + 1}): "
-                f"{e}. Retrying in {delay}s..."
-            )
-
-            
-
+        if self._tts._opts.stream:        
+            await self._run_streaming(output_emitter)
+        else:
+            await self._run_non_streaming(output_emitter)
+           
         output_emitter.flush()
