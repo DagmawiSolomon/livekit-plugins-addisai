@@ -2,25 +2,27 @@ import logging
 import asyncio
 import os
 import base64
+import binascii
 import json
 import httpx
 import miniaudio
 from dataclasses import dataclass, replace
 from typing import Optional
 from livekit.agents import tts, utils
+from livekit.agents._exceptions import APIError
 from livekit.agents.tts import AudioEmitter
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
 from livekit.agents.utils import is_given
 from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
 from typing import Literal
-
 from .constants import API_BASE_URL
 
+DEFAULT_TTS_URL = f"{API_BASE_URL}/api/v1/audio"
 ADDIS_AI_TTS_LANGUAGES = Literal["am","om"]
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TTS_URL = f"{API_BASE_URL}/api/v1/audio"
+
 @dataclass(frozen=True)
 class TTSOptions:
     api_key: str
@@ -90,6 +92,8 @@ class TTS(tts.TTS):
             conn_options=conn_options,
         )
 
+class AudioDecodeError(Exception):
+    """Raised when audio data cannot be decoded into PCM."""
 
 class ChunkedStream(BaseChunkedStream):
 
@@ -99,14 +103,20 @@ class ChunkedStream(BaseChunkedStream):
         self._opts = replace(tts._opts)
 
     def decode_to_pcm(self, api_base64_audio: str) -> bytes:
-        audio_bytes = base64.b64decode(api_base64_audio)
-        decoded = miniaudio.decode(
-            audio_bytes,
-            output_format=miniaudio.SampleFormat.SIGNED16,
-            nchannels=1,
-            sample_rate=self._tts._opts.sample_rate,
-        )
-        return bytes(decoded.samples)
+        try:
+            audio_bytes = base64.b64decode(api_base64_audio)
+            decoded = miniaudio.decode(
+                audio_bytes,
+                output_format=miniaudio.SampleFormat.SIGNED16,
+                nchannels=1,
+                sample_rate=self._tts._opts.sample_rate,
+            )
+            return bytes(decoded.samples)
+        except binascii.Error as e:
+            raise AudioDecodeError("Invalid base64 audio data") from e
+        except miniaudio.DecodeError as e:
+            raise AudioDecodeError("Failed to decode audio data") from e
+            
 
     
     def _build_request(self):
@@ -122,18 +132,54 @@ class ChunkedStream(BaseChunkedStream):
             },
         )
 
-    def _raise_for_status(self, response):
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            raise APIError(
-                f"STT provider error: {response.status_code}"
-            ) from e
+    def _check_status(self, response):
+        status = response.status_code
+
+        if status == 429:
+            logger.warning(
+                "tts_rate_limited",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                    "status": status,
+                }
+            )
+            raise ValueError(f"TTS rate limited {status}")
+
+        if 500 <= status < 600:
+            logger.warning(
+                "tts_http_error",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                    "status": status,
+                },
+            )
+            raise APIError(f"TTS error {status}")
+
+        if status >= 400:
+            logger.error(
+                "tts_http_error",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                    "status": status,
+                },
+            )
+            raise ValueError(f"TTS error {status}")
 
     def _parse_stream_line(self, line: str):
         try:
             data = json.loads(line)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning(
+                "tts_invalid_stream_line",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                },
+                exc_info=e,
+            )
             return None
 
         base64_str = data.get("audio_chunk")
@@ -145,35 +191,108 @@ class ChunkedStream(BaseChunkedStream):
 
     async def _run_streaming(self, output_emitter: AudioEmitter):
         payload, headers = self._build_request() 
-        async with self._tts._client.stream(
-            "POST",
-            self._tts._opts.base_url,
-            json=payload,
-            headers=headers,
-            timeout=self._conn_options.timeout,
-        ) as response:
+        
+        logger.info(
+            "tts_stream_request",
+            extra={
+                "provider": self._tts.provider,
+                "model": self._tts.model,
+                "timeout": self._conn_options.timeout,
+            },
+        )
 
-            self._raise_for_status(response)
-            async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    pcm = self._parse_stream_line(line)
-                    if pcm:
-                        output_emitter.push(pcm)
+        try:
+            async with self._tts._client.stream(
+                "POST",
+                self._tts._opts.base_url,
+                json=payload,
+                headers=headers,
+                timeout=self._conn_options.timeout,
+            ) as response:
+    
+                self._check_status(response)
+                
+                logger.info(
+                    "tts_stream_response_received",
+                    extra={
+                        "provider": self._tts.provider,
+                        "model": self._tts.model,
+                        "status": response.status_code,
+                    },
+                )
+    
+                async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        pcm = self._parse_stream_line(line)
+                        if pcm:
+                            output_emitter.push(pcm)
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            logger.warning(
+                "tts_network_error",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                },
+                exc_info=e,
+            )
+            raise APIError("Network error contacting TTS provider") from e
 
     async def _run_non_streaming(self, output_emitter):
         payload, headers = self._build_request()
 
-        response = await self._tts._client.post(
-            self._tts._opts.base_url,
-            json=payload,
-            headers=headers,
-            timeout=self._conn_options.timeout,
+        logger.info(
+            "tts_request",
+            extra={
+                "provider": self._tts.provider,
+                "model": self._tts.model,
+                "timeout": self._conn_options.timeout,
+            },
         )
 
-        self._raise_for_status(response)
+        try:
+            response = await self._tts._client.post(
+                self._tts._opts.base_url,
+                json=payload,
+                headers=headers,
+                timeout=self._conn_options.timeout,
+            )
 
-        data = response.json()
+            logger.info(
+                "tts_response_received",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                    "status": response.status_code,
+                },
+            )
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            logger.warning(
+                "tts_network_error",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                },
+                exc_info=e,
+            )
+            raise APIError("Network error contacting TTS provider") from e
+
+        self._check_status(response)
+
+        try:
+            data = response.json()
+        except Exception as e:
+            logger.warning(
+                "tts_invalid_response",
+                extra={
+                    "provider": self._tts.provider,
+                    "model": self._tts.model,
+                },
+                exc_info=e,
+            )
+            raise ValueError("Invalid JSON from TTS provider") from e
         base64_str = data.get("audio")
 
         if base64_str:
@@ -182,6 +301,17 @@ class ChunkedStream(BaseChunkedStream):
 
 
     async def _run(self, output_emitter: AudioEmitter) -> None:
+
+        logger.info(
+            "tts_synthesis_started",
+            extra={
+                "provider": self._tts.provider,
+                "model": self._tts.model,
+                "language": str(self._tts._opts.language),
+                "text_length": len(self._input_text),
+                "streaming": self._tts._opts.stream,
+            },
+        )
 
         output_emitter.initialize(
             request_id=utils.shortuuid(),
@@ -195,4 +325,15 @@ class ChunkedStream(BaseChunkedStream):
         else:
             await self._run_non_streaming(output_emitter)
            
+        logger.info(
+            "tts_synthesis_completed",
+            extra={
+                "provider": self._tts.provider,
+                "model": self._tts.model,
+                "language": str(self._tts._opts.language),
+                "text_length": len(self._input_text),
+                "streaming": self._tts._opts.stream,
+            },
+        )
+
         output_emitter.flush()
