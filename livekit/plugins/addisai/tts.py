@@ -128,53 +128,62 @@ class ChunkedStream(BaseChunkedStream):
         )
 
         client = self._tts._client
-        for attempt in range(self._conn_options.max_retry + 1):
-            try:
-                if self._tts._opts.stream:
-                    async with client.stream(
-                        "POST",
-                        self._tts._opts.base_url,
-                        json=payload,
-                        headers=headers,
-                        timeout=self._conn_options.timeout,
-                    ) as response:
-                        response.raise_for_status()
-                        async for line in response.aiter_lines():
-                            if not line.strip():
-                                continue
-                            try:
-                                data = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            base64_str = data.get("audio_chunk")
-                            if not base64_str:
-                                continue
-                            pcm_data = self.decode_to_pcm(base64_str)
-                            output_emitter.push(pcm_data)
-                else:
-                    response = await client.post(
-                        self._tts._opts.base_url,
-                        json=payload,
-                        headers=headers,
-                        timeout=self._conn_options.timeout,
-                    )
+
+
+        try:
+            if self._tts._opts.stream:
+                async with client.stream(
+                    "POST",
+                    self._tts._opts.base_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._conn_options.timeout,
+                ) as response:
                     response.raise_for_status()
-                    data = response.json()
-                    base64_str = data.get("audio")
-                    if base64_str:
+
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        base64_str = data.get("audio_chunk")
+                        if not base64_str:
+                            continue
+
                         pcm_data = self.decode_to_pcm(base64_str)
                         output_emitter.push(pcm_data)
-                
-                break
-            except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
-                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500:
-                    raise e
-                
-                if attempt == self._conn_options.max_retry:
-                    raise e
-                
-                delay = self._conn_options.retry_interval * (2 ** attempt)
-                logger.warning(f"AddisAI request failed (attempt {attempt+1}): {e}. Retrying in {delay}s...")
-                await asyncio.sleep(delay)
+
+            else:
+                response = await client.post(
+                    self._tts._opts.base_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._conn_options.timeout,
+                )
+
+                response.raise_for_status()
+
+                data = response.json()
+                base64_str = data.get("audio")
+
+                if base64_str:
+                    pcm_data = self.decode_to_pcm(base64_str)
+                    output_emitter.push(pcm_data)
+
+            break
+
+        except exception as e:
+        
+
+            logger.warning(
+                f"AddisAI request failed (attempt {attempt + 1}): "
+                f"{e}. Retrying in {delay}s..."
+            )
+
+            
 
         output_emitter.flush()
