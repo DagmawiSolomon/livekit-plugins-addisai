@@ -143,7 +143,7 @@ class STT(stt.STT):
 
         if status == 429:
             logger.warning(
-                "stt_rate_limited"
+                "stt_rate_limited",
                 extra={
                     "provider": self.provider,
                     "model": self.model,
