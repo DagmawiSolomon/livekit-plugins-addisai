@@ -72,7 +72,7 @@ class STT(stt.STT):
             self._opts = replace(self._opts, language=language)
 
     
-    async def post(self, url, files, data, conn_options):
+    async def _post(self, url, files, data, conn_options):
         headers = {"X-API-Key": self._opts.api_key}
 
         logger.info(
@@ -132,7 +132,7 @@ class STT(stt.STT):
         files = {"audio": ("audio.wav", wav_bytes, "audio/wav")}
         data = {"language_code": str(language)}
 
-        response = await self.post(
+        response = await self._post(
             self._opts.base_url,
             files,
             data,
