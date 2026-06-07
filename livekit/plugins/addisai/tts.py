@@ -1,20 +1,26 @@
-import logging
 import asyncio
-import os
 import base64
 import binascii
 import json
+import logging
+import os
+from dataclasses import dataclass, replace
+from typing import Literal, Optional
+
 import httpx
 import miniaudio
-from dataclasses import dataclass, replace
-from typing import Optional
 from livekit.agents import tts, utils
 from livekit.agents._exceptions import APIError
 from livekit.agents.tts import AudioEmitter
 from livekit.agents.tts import ChunkedStream as BaseChunkedStream
+from livekit.agents.types import (
+    APIConnectOptions,
+    DEFAULT_API_CONNECT_OPTIONS,
+    NOT_GIVEN,
+    NotGivenOr,
+)
 from livekit.agents.utils import is_given
-from livekit.agents.types import NOT_GIVEN, NotGivenOr, APIConnectOptions, DEFAULT_API_CONNECT_OPTIONS
-from typing import Literal
+
 from .constants import API_BASE_URL
 
 DEFAULT_TTS_URL = f"{API_BASE_URL}/api/v1/audio"
