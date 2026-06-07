@@ -67,7 +67,13 @@ class STT(stt.STT):
     def provider(self) -> str:
         return "AddisAI"
 
-    def update_options(self, *, language:NotGivenOr[str] = NOT_GIVEN) -> None:
+    def update_options(self,*,model=NOT_GIVEN,language=NOT_GIVEN,extra=NOT_GIVEN,) -> None:
+        if is_given(model):
+            raise NotImplementedError("Updating 'model' is not supported.")
+
+        if is_given(extra):
+            raise NotImplementedError("Updating 'extra' options is not supported.")
+
         if is_given(language):
             self._opts = replace(self._opts, language=language)
 
