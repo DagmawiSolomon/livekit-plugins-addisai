@@ -42,7 +42,6 @@ class STT(stt.STT):
             capabilities=stt.STTCapabilities(
                 streaming=False,
                 interim_results=False, 
-                offline_recognize=True
             )
         )
 
