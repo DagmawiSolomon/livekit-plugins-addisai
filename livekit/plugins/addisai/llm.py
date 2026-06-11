@@ -1,10 +1,14 @@
 
+
+
 import logging
 
+from typing import Literal
 
 from livekit.agents import llm
-from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr, 
-from livekit.agents.chat_context import ChatContext,
+from livekit.agents.llm import LLMStream
+from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
+from livekit.agents import ChatContent
 
 from .constants import API_BASE_URL
 
@@ -17,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class llm(llm.LLM):
-    def __ini__():
+    def __init__():
         pass
 
     
@@ -34,7 +38,7 @@ class llm(llm.LLM):
         *,
         chat_ctx: ChatContext,
         tools: list[Tool] | None = None,
-        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
+        conn_options: APIConnectOptions ,
         parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
         tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
         extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
