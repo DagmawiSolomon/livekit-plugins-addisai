@@ -7,7 +7,7 @@ from dataclasses import dataclass, replace
 
 
 import httpx
-from typing import Literal
+from enum import Enum
 
 from livekit.agents import stt
 from livekit.agents.stt import SpeechData, SpeechEvent, SpeechEventType
@@ -18,9 +18,12 @@ from .constants import API_BASE_URL
 
 
 DEFAULT_STT_URL = f"{API_BASE_URL}/api/v2/stt"   
-ADDIS_AI_STT_LANGUAGES = Literal["am", "om"]
 
 logger = logging.getLogger(__name__)
+
+class ADDIS_AI_STT_LANGUAGES(str, Enum):
+    AM = "am"
+    OM = "om"
 
 
 @dataclass(frozen=True)
@@ -44,7 +47,7 @@ class STT(stt.STT):
                 interim_results=False, 
             )
         )
-
+         
         addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
         if not addisai_api_key:
             raise ValueError(
@@ -54,10 +57,10 @@ class STT(stt.STT):
 
         self._opts = STTOptions(
             api_key=addisai_api_key,
-            language=language,
+            language=ADDIS_AI_STT_LANGUAGES(language),
             base_url=base_url
         )
-
+        # TODO: implement connection pooling
         self._client = httpx.AsyncClient()
     @property
     def model(self) -> str:

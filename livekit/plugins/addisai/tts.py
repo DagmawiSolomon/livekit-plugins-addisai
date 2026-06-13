@@ -5,8 +5,8 @@ import json
 import logging
 import os
 from dataclasses import dataclass, replace
-from typing import Literal, Optional
 
+from enum import Enum
 import httpx
 import miniaudio
 from livekit.agents import tts, utils
@@ -24,7 +24,10 @@ from livekit.agents.utils import is_given
 from .constants import API_BASE_URL
 
 DEFAULT_TTS_URL = f"{API_BASE_URL}/api/v1/audio"
-ADDIS_AI_TTS_LANGUAGES = Literal["am","om"]
+class ADDIS_AI_TTS_LANGUAGES (str, Enum):
+    AM = "am"
+    OM = "om"
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +45,7 @@ class TTS(tts.TTS):
     def __init__(
         self,
         *,
-        language: ADDIS_AI_TTS_LANGUAGES,
+        language = ADDIS_AI_TTS_LANGUAGES,
         base_url: str = DEFAULT_TTS_URL,
         api_key: NotGivenOr[str] = NOT_GIVEN,
         stream: bool = True,
@@ -64,15 +67,16 @@ class TTS(tts.TTS):
                 "AddisAI API key is required, either as argument or set "
                 "ADDISAI_API_KEY environment variable"
             )
-
+        
+        
         self._opts = TTSOptions(
             api_key=addisai_api_key,
-            language=language,
+            language=ADDIS_AI_TTS_LANGUAGES(language),
             base_url=base_url,
             sample_rate=sample_rate,
             stream=stream
         )
-
+        # TODO: implement connection pooling
         self._client = httpx.AsyncClient()
 
     @property
