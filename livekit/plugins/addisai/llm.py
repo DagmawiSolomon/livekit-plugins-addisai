@@ -11,6 +11,7 @@ from livekit.agents import llm
 from livekit.agents.llm import LLMStream
 from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
+from livekit.agents._exceptions import APIError
 from livekit.agents import ChatContent
 
 from .constants import API_BASE_URL
@@ -70,6 +71,49 @@ class llm(llm.LLM):
     @property
     def provider(self) -> str:
         return "AddisAI"
+    
+    async def _send_llm_request(self,*,url,data,conn_options) -> httpx.Response:    
+        headers = {"X-API-Key": self._opts.api_key}
+        logger.info(
+            "llm_request",
+            extra={
+                "provider": self.provider,
+                "model": self.model,
+                "timeout": conn_options.timeout
+            }
+        )
+
+        try: 
+            response = await self._client.post(
+                url,
+                data=data,
+                headers=headers,
+                timeout=conn_options.timeout
+            )
+
+            logger.info(
+                "llm_response_received",
+                extra={
+                    "provider": self.provider,
+                    "model": self.model,
+                    "status": response.status_code,
+                },
+            )
+
+            return response
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            logger.warning(
+                "llm_network_error",
+                extra={
+                    "provider": self.provider,
+                    "model": self.model,
+                },
+                exc_info=e,
+            )
+            raise APIError("Network error contacting STT provider") from e
+
+
+
 
     async def chat(
         self,
@@ -81,7 +125,11 @@ class llm(llm.LLM):
         tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
         extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
     ) -> LLMStream:
-        pass
+        
+        try:
+            response = await self._send_llm_request(url=self._opts.base_url,conn_options=conn_options )
+        except:
+            pass
 
     async def aclose(self):
         if self._owns_client:
