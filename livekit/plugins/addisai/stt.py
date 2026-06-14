@@ -38,7 +38,8 @@ class STT(stt.STT):
         *, 
         language: ADDIS_AI_STT_LANGUAGES,
         base_url:str = DEFAULT_STT_URL,
-        api_key:NotGivenOr[str] = NOT_GIVEN
+        api_key:NotGivenOr[str] = NOT_GIVEN,
+        client: httpx.AsyncClient | None
         ):
 
         super().__init__(
@@ -60,8 +61,9 @@ class STT(stt.STT):
             language=ADDIS_AI_STT_LANGUAGES(language),
             base_url=base_url
         )
-        # TODO: implement connection pooling
-        self._client = httpx.AsyncClient()
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient()
+
     @property
     def model(self) -> str:
         return "Unknown"
@@ -216,3 +218,7 @@ class STT(stt.STT):
                 )
             ],
         )
+    
+    async def aclose(self) -> None:
+        if self._owns_client:
+            self._client.aclose()

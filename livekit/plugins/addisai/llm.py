@@ -1,29 +1,67 @@
 
 
-
+import os
 import logging
+from dataclasses import dataclass
 
-from typing import Literal
+import httpx
 
+from enum import Enum
 from livekit.agents import llm
 from livekit.agents.llm import LLMStream
 from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
+from livekit.agents.utils import is_given
 from livekit.agents import ChatContent
 
 from .constants import API_BASE_URL
 
 DEFAULT_LLM_URL = f"{API_BASE_URL}/v1/chat_generate"
-ADDIS_AI_STT_LANGUAGES = Literal["am", "om"]
 
 logger = logging.getLogger(__name__)
 
 
+class ADDIS_AI_LLM_LANGUAGES(str, Enum):
+    AM = "am"
+    OM = "om"
 
+@dataclass(frozen=True)
+class LLMOptions:
+    api_key: str
+    base_url: str
+    language: ADDIS_AI_LLM_LANGUAGES
+
+    temperature: float
+    top_p: float 
+    top_k: int
+    max_output_tokens: int | None
 
 class llm(llm.LLM):
-    def __init__():
-        pass
+    def __init__(
+            self,
+            *, 
+            language: ADDIS_AI_LLM_LANGUAGES, 
+            base_url: str = DEFAULT_LLM_URL, 
+            api_key: NotGivenOr[str] = NOT_GIVEN, 
+            generation_config:  dict,
+            client: httpx.AsyncClient | None 
+        ):
+        addisai_api_key = api_key if is_given(api_key) else os.environ.get("ADDISAI_API_KEY")
+        if not addisai_api_key:
+            raise ValueError(
+                "AddisAI API key is required, either as argument or set "
+                "ADDISAI_API_KEY environment variable"
+            )
+        
+        self._opts = LLMOptions(
+            api_key= addisai_api_key,
+            language=ADDIS_AI_LLM_LANGUAGES(language),
+            base_url=base_url,
+            **generation_config
+        )
 
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient()
+         
     
     @property
     def model(self) -> str:
@@ -33,7 +71,7 @@ class llm(llm.LLM):
     def provider(self) -> str:
         return "AddisAI"
 
-    def chat(
+    async def chat(
         self,
         *,
         chat_ctx: ChatContext,
@@ -44,3 +82,7 @@ class llm(llm.LLM):
         extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
     ) -> LLMStream:
         pass
+
+    async def aclose(self):
+        if self._owns_client:
+            await self._client.aclose()

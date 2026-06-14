@@ -50,7 +50,8 @@ class TTS(tts.TTS):
         api_key: NotGivenOr[str] = NOT_GIVEN,
         stream: bool = True,
         sample_rate: int = 24000,
-        num_channels: int = 1
+        num_channels: int = 1,
+        client: httpx.AsyncClient
     ):
         super().__init__(
             capabilities=tts.TTSCapabilities(
@@ -76,8 +77,8 @@ class TTS(tts.TTS):
             sample_rate=sample_rate,
             stream=stream
         )
-        # TODO: implement connection pooling
-        self._client = httpx.AsyncClient()
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient()
 
     @property
     def model(self) -> str:
@@ -86,9 +87,6 @@ class TTS(tts.TTS):
     @property
     def provider(self) -> str:
         return "AddisAI"
-
-    async def aclose(self) -> None:
-        await self._client.aclose()
 
     def update_options(self, *, language:NotGivenOr[str] = NOT_GIVEN) -> None:
         if is_given(language):
@@ -101,7 +99,11 @@ class TTS(tts.TTS):
             input_text=text,
             conn_options=conn_options,
         )
-
+    
+    async def aclose(self) -> None:
+        if self._owns_client:
+            await self._client.aclose()
+            
 class AudioDecodeError(Exception):
     """Raised when audio data cannot be decoded into PCM."""
 
