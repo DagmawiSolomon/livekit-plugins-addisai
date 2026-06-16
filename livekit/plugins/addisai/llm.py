@@ -1,22 +1,23 @@
 
 
 import os
+import json
 import logging
+from typing import Any
 from dataclasses import dataclass
 
 import httpx
 
 from enum import Enum
 from livekit.agents import llm
-from livekit.agents.llm import LLMStream
+from livekit.agents.llm import ChatContext, LLMStream, Tool, ToolChoice
 from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 from livekit.agents._exceptions import APIError
-from livekit.agents import ChatContent
 
 from .constants import API_BASE_URL
 
-DEFAULT_LLM_URL = f"{API_BASE_URL}/v1/chat_generate"
+DEFAULT_LLM_URL = f"{API_BASE_URL}/api/v1/chat_generate"
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +32,12 @@ class LLMOptions:
     base_url: str
     language: ADDIS_AI_LLM_LANGUAGES
 
-    temperature: float
-    top_p: float 
-    top_k: int
+    temperature: float | None
+    top_p: float | None
+    top_k: int | None
     max_output_tokens: int | None
 
-class llm(llm.LLM):
+class LLM(llm.LLM):
     def __init__(
             self,
             *, 
@@ -73,7 +74,10 @@ class llm(llm.LLM):
         return "AddisAI"
     
     async def _send_llm_request(self,*,url,data,conn_options) -> httpx.Response:    
-        headers = {"X-API-Key": self._opts.api_key}
+        headers = {
+            "X-API-Key": self._opts.api_key,
+            "Content-Type": "application/json",
+        }
         logger.info(
             "llm_request",
             extra={
@@ -86,7 +90,7 @@ class llm(llm.LLM):
         try: 
             response = await self._client.post(
                 url,
-                data=data,
+                json=data,
                 headers=headers,
                 timeout=conn_options.timeout
             )
@@ -110,7 +114,7 @@ class llm(llm.LLM):
                 },
                 exc_info=e,
             )
-            raise APIError("Network error contacting STT provider") from e
+            raise APIError("Network error contacting LLM provider") from e
 
 
 
@@ -127,7 +131,47 @@ class llm(llm.LLM):
     ) -> LLMStream:
         
         try:
-            response = await self._send_llm_request(url=self._opts.base_url,conn_options=conn_options )
+            
+            conversation_history = []
+            for item in chat_ctx.items[:-1]:
+                role = "assistant" if item.role == "assistant" else "user"
+                content = item.text_content if hasattr(item, "text_content") else str(item)
+                conversation_history.append({
+                    "role": role,
+                    "content": content,
+                })
+
+            last_item = chat_ctx.items[-1]
+            prompt = last_item.text_content if hasattr(last_item, "text_content") else str(last_item)
+
+            generation_config = {}
+            if self._opts.temperature is not None:
+                generation_config["temperature"] = self._opts.temperature
+            if self._opts.max_output_tokens is not None:
+                generation_config["maxOutputTokens"] = self._opts.max_output_tokens
+            if self._opts.top_p is not None:
+                generation_config["topP"] = self._opts.top_p
+            if self._opts.top_k is not None:
+                generation_config["topK"] = self._opts.top_k
+
+            data = {
+                "prompt": prompt,
+                "target_language": self._opts.language.value,
+            }
+
+            if conversation_history:
+                data["conversation_history"] = conversation_history
+
+            if generation_config:
+                data["generation_config"] = generation_config
+
+            response = await self._send_llm_request(
+                url=self._opts.base_url,
+                data=data,
+                conn_options=conn_options,
+            )
+
+            #create an llm stream from the data
         except:
             pass
 
