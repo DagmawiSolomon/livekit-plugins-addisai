@@ -10,10 +10,11 @@ import httpx
 
 from enum import Enum
 from livekit.agents import llm
-from livekit.agents.llm import ChatContext, LLMStream, Tool, ToolChoice
-from livekit.agents.types import APIConnectOptions, NOT_GIVEN, NotGivenOr
+from livekit.agents.llm import ChatContext, Tool, ToolChoice, ChatChunk, ChoiceDelta, ChatRole
+from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS, APIConnectOptions, NOT_GIVEN, NotGivenOr
 from livekit.agents.utils import is_given
 from livekit.agents._exceptions import APIError
+from livekit.agents.llm import LLMStream as BaseLLMStream
 
 from .constants import API_BASE_URL
 
@@ -73,108 +74,148 @@ class LLM(llm.LLM):
     def provider(self) -> str:
         return "AddisAI"
     
-    async def _send_llm_request(self,*,url,data,conn_options) -> httpx.Response:    
-        headers = {
-            "X-API-Key": self._opts.api_key,
-            "Content-Type": "application/json",
-        }
-        logger.info(
-            "llm_request",
-            extra={
-                "provider": self.provider,
-                "model": self.model,
-                "timeout": conn_options.timeout
-            }
-        )
-
-        try: 
-            response = await self._client.post(
-                url,
-                json=data,
-                headers=headers,
-                timeout=conn_options.timeout
-            )
-
-            logger.info(
-                "llm_response_received",
-                extra={
-                    "provider": self.provider,
-                    "model": self.model,
-                    "status": response.status_code,
-                },
-            )
-
-            return response
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
-            logger.warning(
-                "llm_network_error",
-                extra={
-                    "provider": self.provider,
-                    "model": self.model,
-                },
-                exc_info=e,
-            )
-            raise APIError("Network error contacting LLM provider") from e
 
 
 
-
-    async def chat(
+    def chat(
         self,
         *,
         chat_ctx: ChatContext,
         tools: list[Tool] | None = None,
-        conn_options: APIConnectOptions ,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
         parallel_tool_calls: NotGivenOr[bool] = NOT_GIVEN,
         tool_choice: NotGivenOr[ToolChoice] = NOT_GIVEN,
         extra_kwargs: NotGivenOr[dict[str, Any]] = NOT_GIVEN,
-    ) -> LLMStream:
-        
-        try:
-            
-            conversation_history = []
-            for item in chat_ctx.items[:-1]:
-                role = "assistant" if item.role == "assistant" else "user"
-                content = item.text_content if hasattr(item, "text_content") else str(item)
-                conversation_history.append({
-                    "role": role,
-                    "content": content,
-                })
-
-            last_item = chat_ctx.items[-1]
-            prompt = last_item.text_content if hasattr(last_item, "text_content") else str(last_item)
-
-            generation_config = {}
-            if self._opts.temperature is not None:
-                generation_config["temperature"] = self._opts.temperature
-            if self._opts.max_output_tokens is not None:
-                generation_config["maxOutputTokens"] = self._opts.max_output_tokens
-            if self._opts.top_p is not None:
-                generation_config["topP"] = self._opts.top_p
-            if self._opts.top_k is not None:
-                generation_config["topK"] = self._opts.top_k
-
-            data = {
-                "prompt": prompt,
-                "target_language": self._opts.language.value,
-            }
-
-            if conversation_history:
-                data["conversation_history"] = conversation_history
-
-            if generation_config:
-                data["generation_config"] = generation_config
-
-            response = await self._send_llm_request(
-                url=self._opts.base_url,
-                data=data,
-                conn_options=conn_options,
-            )
-
-            #create an llm stream from the data
-        except:
-            pass
+    ) -> "LLMStream":
+        return LLMStream(
+            llm=self,
+            chat_ctx=chat_ctx,
+            tools=tools or [],
+            conn_options=conn_options,
+        )
 
     async def aclose(self):
         if self._owns_client:
             await self._client.aclose()
+
+
+class LLMStream(BaseLLMStream):
+    def __init__(
+        self,
+        llm: LLM,
+        *,
+        chat_ctx: ChatContext,
+        tools: list[Tool],
+        conn_options: APIConnectOptions,
+    ):
+        super().__init__(
+            llm=llm, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options
+        )
+
+    async def _run(self) -> None:
+        llm: LLM = self._llm  # type: ignore
+        opts = llm._opts
+        chat_ctx = self._chat_ctx
+
+        conversation_history = []
+        for item in chat_ctx.items[:-1]:
+            role = "assistant" if item.role == "assistant" else "user"
+            content = item.text_content if hasattr(item, "text_content") else str(item)
+            conversation_history.append({
+                "role": role,
+                "content": content,
+            })
+
+        if not chat_ctx.items:
+            raise ValueError("chat_ctx must have at least one item")
+
+        last_item = chat_ctx.items[-1]
+        prompt = last_item.text_content if hasattr(last_item, "text_content") else str(last_item)
+
+        generation_config = {}
+        if opts.temperature is not None:
+            generation_config["temperature"] = opts.temperature
+        if opts.max_output_tokens is not None:
+            generation_config["maxOutputTokens"] = opts.max_output_tokens
+        if opts.top_p is not None:
+            generation_config["topP"] = opts.top_p
+        if opts.top_k is not None:
+            generation_config["topK"] = opts.top_k
+
+        data = {
+            "prompt": prompt,
+            "target_language": opts.language.value,
+        }
+
+        if conversation_history:
+            data["conversation_history"] = conversation_history
+
+        if generation_config:
+            data["generation_config"] = generation_config
+
+        headers = {
+            "X-API-Key": opts.api_key,
+            "Content-Type": "application/json",
+        }
+
+        logger.info(
+            "llm_request",
+            extra={
+                "provider": llm.provider,
+                "model": llm.model,
+                "timeout": self._conn_options.timeout
+            }
+        )
+
+        try:
+            response = await llm._client.post(
+                opts.base_url,
+                json=data,
+                headers=headers,
+                timeout=self._conn_options.timeout
+            )
+            response.raise_for_status()
+
+            logger.info(
+                "llm_response_received",
+                extra={
+                    "provider": llm.provider,
+                    "model": llm.model,
+                    "status": response.status_code,
+                },
+            )
+            
+            response_data = response.json()
+            content = response_data.get("response_text", "")
+            
+            usage_metadata = response_data.get("usage_metadata", {})
+            from livekit.agents.llm import CompletionUsage
+            usage = CompletionUsage(
+                completion_tokens=usage_metadata.get("candidates_token_count", 0),
+                prompt_tokens=usage_metadata.get("prompt_token_count", 0),
+                total_tokens=usage_metadata.get("total_token_count", 0),
+            ) if usage_metadata else None
+
+            request_id = httpx.utils.to_bytes(os.urandom(8)).hex()
+            
+            self._event_ch.send_nowait(
+                ChatChunk(
+                    id=request_id,
+                    delta=ChoiceDelta(
+                        role=ChatRole.ASSISTANT,
+                        content=content,
+                    ),
+                    usage=usage,
+                )
+            )
+            
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as e:
+            logger.warning(
+                "llm_network_error",
+                extra={
+                    "provider": llm.provider,
+                    "model": llm.model,
+                },
+                exc_info=e,
+            )
+            raise APIError("Network error contacting LLM provider") from e
