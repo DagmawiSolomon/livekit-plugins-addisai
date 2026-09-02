@@ -39,7 +39,7 @@ class STT(stt.STT):
         language: ADDIS_AI_STT_LANGUAGES,
         base_url:str = DEFAULT_STT_URL,
         api_key:NotGivenOr[str] = NOT_GIVEN,
-        client: httpx.AsyncClient | None
+        client: httpx.AsyncClient | None = None
         ):
 
         super().__init__(

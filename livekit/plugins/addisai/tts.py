@@ -51,7 +51,7 @@ class TTS(tts.TTS):
         stream: bool = True,
         sample_rate: int = 24000,
         num_channels: int = 1,
-        client: httpx.AsyncClient
+        client: httpx.AsyncClient = None
     ):
         super().__init__(
             capabilities=tts.TTSCapabilities(
