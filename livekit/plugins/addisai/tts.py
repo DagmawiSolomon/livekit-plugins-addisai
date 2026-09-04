@@ -135,7 +135,7 @@ class ChunkedStream(BaseChunkedStream):
         return (
             {
                 "text": self._input_text,
-                "language": self._tts._opts.language,
+                "language": self._tts._opts.language.value if hasattr(self._tts._opts.language, "value") else str(self._tts._opts.language),
                 "stream": self._tts._opts.stream,
             },
             {

@@ -140,7 +140,7 @@ class STT(stt.STT):
         )
 
         files = {"audio": ("audio.wav", wav_bytes, "audio/wav")}
-        data = {"language_code": str(language)}
+        data = {"language_code": language.value if hasattr(language, "value") else str(language)}
 
         response = await self._send_stt_request(
             self._opts.base_url,
@@ -180,9 +180,10 @@ class STT(stt.STT):
                     "provider": self.provider,
                     "model": self.model,
                     "status": status,
+                    "body": response.text,
                 },
             )
-            raise ValueError(f"STT error {status}")
+            raise ValueError(f"STT error {status}: {response.text}")
 
         try:
             res = response.json()
